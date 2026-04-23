@@ -1,0 +1,7 @@
+8.8.8.8 google-dns-icmp
+1.1.1.1 cloudflare-icmp
+tcp://1.1.1.1:53 cloudflare-dns-tcp
+tcp://8.8.8.8:53 google-dns-tcp
+http://yahoo.co.jp example-http
+https://google.com example-https
+https://example.com:8443 example-alt-port
