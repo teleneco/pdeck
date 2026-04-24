@@ -143,8 +143,8 @@ cargo run -- --replay session.jsonl --stats session-stats.csv
 この変換は記録ファイル全体を読み込み、TUI を開かずに終了します。
 stats path を省略した場合、`session.jsonl` から `session_stats.csv` を出力します。
 stats CSV には host、最後に解決した IP、description、パケット数、
-応答数/ロス数、ロス率、最初/最後の probe 時刻、duration、
-ダウンタイム合計、ダウン率、ダウン区間、最後の status/response を出力します。
+応答数/ロス数、ロス率、RTT min/avg/max/stddev、最初/最後の probe 時刻、
+duration、ダウンタイム合計、ダウン率、ダウン区間、最後の status/response を出力します。
 
 ## Roadmap
 

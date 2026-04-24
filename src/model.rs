@@ -38,6 +38,11 @@ pub struct HostStats {
     pub sent_count: u64,
     pub success_count: u64,
     pub loss_percent: f64,
+    pub rtt_count: u64,
+    pub rtt_min_ms: Option<f64>,
+    pub rtt_max_ms: Option<f64>,
+    pub rtt_sum_ms: f64,
+    pub rtt_sum_squares_ms: f64,
     pub dead_now: bool,
     pub last_status: String,
     pub last_response: String,
@@ -124,6 +129,13 @@ impl App {
                 stat.success_count += 1;
             } else {
                 stat.loss_count += 1;
+            }
+            if let Some(rtt_ms) = event.rtt_ms {
+                stat.rtt_count += 1;
+                stat.rtt_min_ms = Some(stat.rtt_min_ms.map_or(rtt_ms, |value| value.min(rtt_ms)));
+                stat.rtt_max_ms = Some(stat.rtt_max_ms.map_or(rtt_ms, |value| value.max(rtt_ms)));
+                stat.rtt_sum_ms += rtt_ms;
+                stat.rtt_sum_squares_ms += rtt_ms * rtt_ms;
             }
             stat.loss_percent = if stat.sent_count == 0 {
                 0.0
@@ -246,6 +258,11 @@ fn build_host_stats(targets: &[Target]) -> Vec<HostStats> {
             sent_count: 0,
             success_count: 0,
             loss_percent: 0.0,
+            rtt_count: 0,
+            rtt_min_ms: None,
+            rtt_max_ms: None,
+            rtt_sum_ms: 0.0,
+            rtt_sum_squares_ms: 0.0,
             dead_now: false,
             last_status: "-".to_string(),
             last_response: "-".to_string(),

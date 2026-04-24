@@ -144,9 +144,9 @@ cargo run -- --replay session.jsonl --stats session-stats.csv
 This conversion reads the full recorded session and exits without opening the
 TUI. When no stats path is provided, `session.jsonl` writes `session_stats.csv`.
 The stats CSV includes host, last resolved IP, description, packet counts,
-response/loss counts, loss percentage, first/last probe times, duration,
-downtime totals, downtime percentage, downtime periods, and the last observed
-status/response.
+response/loss counts, loss percentage, RTT min/avg/max/stddev, first/last probe
+times, duration, downtime totals, downtime percentage, downtime periods, and the
+last observed status/response.
 
 ## Roadmap
 

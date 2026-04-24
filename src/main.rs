@@ -472,7 +472,7 @@ fn write_stats_csv(path: &PathBuf, app: &App) -> Result<()> {
 
     writeln!(
         file,
-        "host,ip,description,packets,responses,losses,loss_percent,started_at,ended_at,duration_ms,duration,downtime_count,downtime_ms,downtime,downtime_percent,downtime_periods,last_status,last_response"
+        "host,ip,description,packets,responses,losses,loss_percent,rtt_min_ms,rtt_avg_ms,rtt_max_ms,rtt_stddev_ms,started_at,ended_at,duration_ms,duration,downtime_count,downtime_ms,downtime,downtime_percent,downtime_periods,last_status,last_response"
     )?;
     for stat in &app.stats {
         write_stats_row(&mut file, stat)?;
@@ -524,6 +524,15 @@ fn write_stats_row(file: &mut File, stat: &HostStats) -> Result<()> {
     } else {
         ((downtime_ms as f64 / duration_ms as f64) * 10000.0).round() / 100.0
     };
+    let rtt_avg_ms = if stat.rtt_count == 0 {
+        None
+    } else {
+        Some(stat.rtt_sum_ms / stat.rtt_count as f64)
+    };
+    let rtt_stddev_ms = rtt_avg_ms.map(|avg| {
+        let variance = (stat.rtt_sum_squares_ms / stat.rtt_count as f64) - (avg * avg);
+        variance.max(0.0).sqrt()
+    });
     let mut periods = stat
         .downtime_periods
         .iter()
@@ -545,6 +554,10 @@ fn write_stats_row(file: &mut File, stat: &HostStats) -> Result<()> {
         stat.success_count.to_string(),
         stat.loss_count.to_string(),
         format!("{:.2}", stat.loss_percent),
+        format_optional_ms(stat.rtt_min_ms),
+        format_optional_ms(rtt_avg_ms),
+        format_optional_ms(stat.rtt_max_ms),
+        format_optional_ms(rtt_stddev_ms),
         stat.first_ts_ms.map(format_ts).unwrap_or_default(),
         stat.last_ts_ms.map(format_ts).unwrap_or_default(),
         duration_ms.to_string(),
@@ -567,6 +580,10 @@ fn write_stats_row(file: &mut File, stat: &HostStats) -> Result<()> {
             .join(",")
     )?;
     Ok(())
+}
+
+fn format_optional_ms(value: Option<f64>) -> String {
+    value.map(|value| format!("{value:.3}")).unwrap_or_default()
 }
 
 fn csv_escape(value: &str) -> String {
