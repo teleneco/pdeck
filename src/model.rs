@@ -36,6 +36,7 @@ pub struct HostStats {
     pub last_resolved_ip: Option<String>,
     pub loss_count: u64,
     pub sent_count: u64,
+    pub success_count: u64,
     pub loss_percent: f64,
     pub dead_now: bool,
     pub last_status: String,
@@ -43,6 +44,12 @@ pub struct HostStats {
     pub last_error: Option<String>,
     pub consecutive_failures: u64,
     pub recent_rtts: VecDeque<RttSample>,
+    pub first_ts_ms: Option<u64>,
+    pub last_ts_ms: Option<u64>,
+    pub total_down_ms: u64,
+    pub down_events: u64,
+    pub down_since_ms: Option<u64>,
+    pub downtime_periods: Vec<(u64, u64)>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -87,23 +94,7 @@ struct KeyRepeatState {
 
 impl App {
     pub fn new(args: Args, targets: Vec<Target>, status_line: String) -> Self {
-        let stats = targets
-            .iter()
-            .cloned()
-            .map(|target| HostStats {
-                target,
-                last_resolved_ip: None,
-                loss_count: 0,
-                sent_count: 0,
-                loss_percent: 0.0,
-                dead_now: false,
-                last_status: "-".to_string(),
-                last_response: "-".to_string(),
-                last_error: None,
-                consecutive_failures: 0,
-                recent_rtts: VecDeque::with_capacity(MAX_RTT_HISTORY),
-            })
-            .collect::<Vec<_>>();
+        let stats = build_host_stats(&targets);
 
         Self {
             args: args.clone(),
@@ -117,10 +108,21 @@ impl App {
         }
     }
 
+    pub fn reset_probe_state(&mut self) {
+        self.stats = build_host_stats(&self.targets);
+        self.results.clear();
+        self.selected_index = self.selected_index.min(self.stats.len().saturating_sub(1));
+        self.key_repeat_state = None;
+    }
+
     pub fn apply_probe_event(&mut self, event: &ProbeEvent) {
         if let Some(stat) = self.stats.get_mut(event.index) {
+            stat.first_ts_ms.get_or_insert(event.ts_ms);
+            stat.last_ts_ms = Some(event.ts_ms);
             stat.sent_count += 1;
-            if !event.ok {
+            if event.ok {
+                stat.success_count += 1;
+            } else {
                 stat.loss_count += 1;
             }
             stat.loss_percent = if stat.sent_count == 0 {
@@ -128,6 +130,17 @@ impl App {
             } else {
                 ((stat.loss_count as f64 / stat.sent_count as f64) * 10000.0).round() / 100.0
             };
+            if event.ok {
+                if let Some(down_since_ms) = stat.down_since_ms.take() {
+                    stat.total_down_ms = stat
+                        .total_down_ms
+                        .saturating_add(event.ts_ms.saturating_sub(down_since_ms));
+                    stat.downtime_periods.push((down_since_ms, event.ts_ms));
+                }
+            } else if stat.down_since_ms.is_none() {
+                stat.down_since_ms = Some(event.ts_ms);
+                stat.down_events += 1;
+            }
             stat.dead_now = !event.ok;
             stat.last_status = event.status.clone();
             stat.last_response = event.response.clone();
@@ -220,4 +233,31 @@ impl App {
         });
         true
     }
+}
+
+fn build_host_stats(targets: &[Target]) -> Vec<HostStats> {
+    targets
+        .iter()
+        .cloned()
+        .map(|target| HostStats {
+            target,
+            last_resolved_ip: None,
+            loss_count: 0,
+            sent_count: 0,
+            success_count: 0,
+            loss_percent: 0.0,
+            dead_now: false,
+            last_status: "-".to_string(),
+            last_response: "-".to_string(),
+            last_error: None,
+            consecutive_failures: 0,
+            recent_rtts: VecDeque::with_capacity(MAX_RTT_HISTORY),
+            first_ts_ms: None,
+            last_ts_ms: None,
+            total_down_ms: 0,
+            down_events: 0,
+            down_since_ms: None,
+            downtime_periods: Vec::new(),
+        })
+        .collect::<Vec<_>>()
 }

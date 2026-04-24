@@ -36,14 +36,17 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = IcmpBackendArg::Auto)]
     pub icmp_backend: IcmpBackendArg,
 
-    #[arg(long)]
-    pub record: Option<PathBuf>,
+    #[arg(long, num_args = 0..=1, value_name = "FILE")]
+    pub record: Option<Option<PathBuf>>,
 
     #[arg(long)]
     pub replay: Option<PathBuf>,
 
     #[arg(long)]
     pub log: Option<PathBuf>,
+
+    #[arg(long, num_args = 0..=1, value_name = "FILE")]
+    pub stats: Option<Option<PathBuf>>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]

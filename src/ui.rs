@@ -27,12 +27,22 @@ pub fn draw_ui(frame: &mut Frame<'_>, app: &App) {
         ])
         .split(root);
 
-    let header = Line::from(vec![
-        Span::raw("Ctrl+S pause/resume  "),
-        Span::raw("Up/Down scroll  "),
-        Span::raw("d/D dead host  "),
-        Span::raw("q/Esc exit"),
-    ]);
+    let header = if app.args.replay.is_some() {
+        Line::from(vec![
+            Span::raw("Ctrl+S pause/resume  "),
+            Span::raw("1/2/5/0 speed  "),
+            Span::raw("Left/Right +/-10s  "),
+            Span::raw("Shift+Left/Right +/-60s  "),
+            Span::raw("q/Esc exit"),
+        ])
+    } else {
+        Line::from(vec![
+            Span::raw("Ctrl+S pause/resume  "),
+            Span::raw("Up/Down scroll  "),
+            Span::raw("d/D dead host  "),
+            Span::raw("q/Esc exit"),
+        ])
+    };
     frame.render_widget(Paragraph::new(header), vertical[0]);
 
     let has_dead = app.stats.iter().any(|stat| stat.dead_now);

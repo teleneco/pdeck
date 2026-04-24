@@ -76,9 +76,10 @@ If you want to read macOS `arp -a` style output directly, use `-A`.
 -V                        Open an editor for a temporary target file
 -c, --concurrency <N>     Maximum concurrent TCP/HTTP probes
 --icmp-backend <BACKEND>  auto, exec, or api
---record <FILE>           Write JSONL session events
+--record [FILE]           Write JSONL session events
 --replay <FILE>           Replay JSONL session events
 --log <FILE>              Write human-readable text log
+--stats [FILE]            Convert a replay JSONL file to per-host CSV statistics
 ```
 
 ICMP backend defaults:
@@ -88,6 +89,9 @@ ICMP backend defaults:
 - Linux: `exec`
 
 The `exec` backend runs `ping` with `LC_ALL=C` and `LANG=C` to reduce locale-dependent output differences.
+The current Windows `api` backend uses the IPv4 ICMP API path internally; if
+IPv6 ICMP coverage is needed, verify the target behavior on Windows before
+depending on it operationally.
 
 ## Controls
 
@@ -104,8 +108,12 @@ Ctrl+C       Quit
 Record a live session:
 
 ```sh
+cargo run -- -f targets.txt --record
 cargo run -- --record session.jsonl
 ```
+
+When no record path is provided, the target file stem is included in the
+generated file name, such as `targets_20260425_120000.jsonl`.
 
 Replay a recorded session:
 
@@ -113,11 +121,39 @@ Replay a recorded session:
 cargo run -- --replay session.jsonl
 ```
 
+Replay controls:
+
+- `Ctrl+S`: pause/resume
+- `1`/`2`/`5`/`0`: playback speed x1/x2/x5/x10
+- `Left`/`Right`: skip backward/forward 10 seconds
+- `Shift+Left`/`Shift+Right`: skip backward/forward 60 seconds
+
 Replay and also write a text log:
 
 ```sh
 cargo run -- --replay session.jsonl --log replay.log
 ```
+
+Convert a recorded JSONL session to per-host CSV statistics:
+
+```sh
+cargo run -- --replay session.jsonl --stats
+cargo run -- --replay session.jsonl --stats session-stats.csv
+```
+
+This conversion reads the full recorded session and exits without opening the
+TUI. When no stats path is provided, `session.jsonl` writes `session_stats.csv`.
+The stats CSV includes host, last resolved IP, description, packet counts,
+response/loss counts, loss percentage, first/last probe times, duration,
+downtime totals, downtime percentage, downtime periods, and the last observed
+status/response.
+
+## Roadmap
+
+- Add record rotation for long-running sessions, with a default target around
+  100MB per JSONL file.
+- Extend stats conversion to read multiple rotated JSONL files or a record
+  directory as one logical session.
 
 ## Build
 
