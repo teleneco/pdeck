@@ -1,6 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use chrono::{Local, TimeZone};
@@ -23,12 +23,12 @@ pub fn write_stats_from_record(replay_path: &PathBuf, stats_path: &PathBuf) -> R
     write_stats_csv(stats_path, &app)
 }
 
-pub fn resolve_stats_path(replay_path: &PathBuf, stats_path: Option<&PathBuf>) -> PathBuf {
+pub fn resolve_stats_path(replay_path: &Path, stats_path: Option<&PathBuf>) -> PathBuf {
     if let Some(path) = stats_path {
         return path.clone();
     }
 
-    let mut path = replay_path.clone();
+    let mut path = replay_path.to_path_buf();
     let stem = replay_path
         .file_stem()
         .and_then(|value| value.to_str())

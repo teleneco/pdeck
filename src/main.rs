@@ -25,6 +25,7 @@ use crate::replay::run_replay;
 use crate::stats::{resolve_stats_path, write_stats_from_record};
 
 const DEFAULT_INTERVAL_MS: u64 = 500;
+const MAX_CONCURRENCY: usize = 1024;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -49,6 +50,9 @@ fn validate_args(args: &Args) -> Result<()> {
     if args.interval.0 < Duration::from_millis(DEFAULT_INTERVAL_MS) {
         bail!("interval must be at least 500ms");
     }
+    if args.concurrency == 0 || args.concurrency > MAX_CONCURRENCY {
+        bail!("concurrency must be between 1 and {MAX_CONCURRENCY}");
+    }
     if args.replay.is_some() && args.record.is_some() {
         bail!("--record and --replay cannot be used together");
     }
@@ -70,17 +74,15 @@ async fn run_replay_command(mut args: Args, replay_path: PathBuf) -> Result<()> 
 
     let status_line = build_status_line(&args, None);
     let mut app = App::new(args, targets, status_line);
-    let mut terminal = ui::init_terminal()?;
-    let result = run_replay(&mut terminal, &mut app, &replay_path, None).await;
-    ui::restore_terminal()?;
-    result
+    let mut terminal_guard = ui::TerminalGuard::new()?;
+    run_replay(terminal_guard.terminal(), &mut app, &replay_path, None).await
 }
 
 async fn run_legacy_or_live(args: &mut Args) -> Result<()> {
     let mut temp_file = None;
     if args.vi_mode {
         let guard = open_editor_with_tempfile().context("failed to create temporary ping list")?;
-        args.file = guard.path().clone();
+        args.file = guard.path().to_path_buf();
         temp_file = Some(guard);
     }
 
@@ -118,14 +120,20 @@ async fn run_legacy_or_live(args: &mut Args) -> Result<()> {
         return run_no_tui_app(&mut app, record_file.as_mut()).await;
     }
 
-    let mut terminal = ui::init_terminal()?;
+    let mut terminal_guard = ui::TerminalGuard::new()?;
     let result = if let Some(replay_path) = &args.replay {
         let mut log_file = if let Some(log_path) = &args.log {
             Some(init_text_log_file(log_path)?)
         } else {
             None
         };
-        run_replay(&mut terminal, &mut app, replay_path, log_file.as_mut()).await
+        run_replay(
+            terminal_guard.terminal(),
+            &mut app,
+            replay_path,
+            log_file.as_mut(),
+        )
+        .await
     } else {
         let mut record_file = if let Some(record_path) = &record_path {
             Some(init_record_file(record_path, &app.targets)?)
@@ -138,14 +146,13 @@ async fn run_legacy_or_live(args: &mut Args) -> Result<()> {
             None
         };
         run_app(
-            &mut terminal,
+            terminal_guard.terminal(),
             &mut app,
             record_file.as_mut(),
             log_file.as_mut(),
         )
         .await
     };
-    ui::restore_terminal()?;
     drop(temp_file);
 
     result

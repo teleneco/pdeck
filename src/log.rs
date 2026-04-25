@@ -1,6 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
@@ -31,12 +31,12 @@ pub fn write_log_from_record(replay_path: &PathBuf, log_path: &PathBuf) -> Resul
     Ok(())
 }
 
-pub fn resolve_log_path(replay_path: &PathBuf, log_path: Option<&PathBuf>) -> PathBuf {
+pub fn resolve_log_path(replay_path: &Path, log_path: Option<&PathBuf>) -> PathBuf {
     if let Some(path) = log_path {
         return path.clone();
     }
 
-    let mut path = replay_path.clone();
+    let mut path = replay_path.to_path_buf();
     let stem = replay_path
         .file_stem()
         .and_then(|value| value.to_str())

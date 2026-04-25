@@ -44,13 +44,13 @@ pub async fn run_app(
             terminal.draw(|frame| ui::draw_ui(frame, app))?;
         }
 
-        if event::poll(Duration::from_millis(UI_TICK_MS))? {
-            if let Event::Key(key) = event::read()? {
-                if ui::handle_key(app, key, &pause_tx)? {
-                    return Ok(());
-                }
-                terminal.draw(|frame| ui::draw_ui(frame, app))?;
+        if event::poll(Duration::from_millis(UI_TICK_MS))?
+            && let Event::Key(key) = event::read()?
+        {
+            if ui::handle_key(app, key, &pause_tx)? {
+                return Ok(());
             }
+            terminal.draw(|frame| ui::draw_ui(frame, app))?;
         }
     }
 }

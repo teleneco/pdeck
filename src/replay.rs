@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
@@ -36,12 +36,11 @@ pub async fn run_replay(
 
     loop {
         let tick_start = Instant::now();
-        if event::poll(Duration::from_millis(1))? {
-            if let Event::Key(key) = event::read()? {
-                if handle_replay_key(app, key, &mut replay, replay_path, &pause_tx)? {
-                    return Ok(());
-                }
-            }
+        if event::poll(Duration::from_millis(1))?
+            && let Event::Key(key) = event::read()?
+            && handle_replay_key(app, key, &mut replay, replay_path, &pause_tx)?
+        {
+            return Ok(());
         }
 
         let mut seek_target = replay.take_seek_target();
@@ -125,7 +124,7 @@ fn handle_replay_key(
     app: &mut App,
     key: crossterm::event::KeyEvent,
     replay: &mut ReplayState,
-    replay_path: &PathBuf,
+    replay_path: &Path,
     pause_tx: &watch::Sender<bool>,
 ) -> Result<bool> {
     use crossterm::event::{KeyCode, KeyEventKind};
@@ -177,7 +176,7 @@ fn rebuild_replay_to(app: &mut App, events: &[ProbeEvent], target_ts: u64) -> us
     next_event_index
 }
 
-fn update_replay_status(app: &mut App, replay: &ReplayState, replay_path: &PathBuf) {
+fn update_replay_status(app: &mut App, replay: &ReplayState, replay_path: &Path) {
     let state = if app.paused { "paused" } else { "replay" };
     app.status_line = format!(
         "{}: {} | speed: x{} | position: {}/{} | Left/Right +/-10s | Shift+Left/Right +/-60s | 1/2/5/0 speed",

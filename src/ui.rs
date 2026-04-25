@@ -15,6 +15,28 @@ use tokio::sync::watch;
 
 use crate::model::{App, HostStats, RepeatableAction, RttSample};
 
+pub struct TerminalGuard {
+    terminal: DefaultTerminal,
+}
+
+impl TerminalGuard {
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            terminal: ratatui::init(),
+        })
+    }
+
+    pub fn terminal(&mut self) -> &mut DefaultTerminal {
+        &mut self.terminal
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        ratatui::restore();
+    }
+}
+
 pub fn draw_ui(frame: &mut Frame<'_>, app: &App) {
     let root = frame.area();
     let vertical = Layout::default()
@@ -132,15 +154,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent, pause_tx: &watch::Sender<bool>) 
         _ => false,
     };
     Ok(quit)
-}
-
-pub fn init_terminal() -> Result<DefaultTerminal> {
-    Ok(ratatui::init())
-}
-
-pub fn restore_terminal() -> Result<()> {
-    ratatui::restore();
-    Ok(())
 }
 
 fn draw_results(frame: &mut Frame<'_>, area: Rect, app: &App) {

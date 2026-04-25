@@ -1,35 +1,27 @@
-use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 use chrono::Local;
+use tempfile::NamedTempFile;
 
 use crate::cli::Args;
 
 pub struct TempFileGuard {
-    path: PathBuf,
+    file: NamedTempFile,
 }
 
 impl TempFileGuard {
-    pub fn new(path: PathBuf) -> Self {
-        Self { path }
-    }
-
-    pub fn path(&self) -> &PathBuf {
-        &self.path
-    }
-}
-
-impl Drop for TempFileGuard {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+    pub fn path(&self) -> &Path {
+        self.file.path()
     }
 }
 
 pub fn open_editor_with_tempfile() -> Result<TempFileGuard> {
-    let path =
-        std::env::temp_dir().join(format!("pdeck-{}.txt", Local::now().format("%Y%m%d%H%M%S")));
-    File::create(&path)?;
+    let file = tempfile::Builder::new()
+        .prefix("pdeck-")
+        .suffix(".txt")
+        .tempfile()?;
+    let path = file.path().to_path_buf();
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
     let (program, args) = parse_editor_command(&editor)?;
     let status = std::process::Command::new(program)
@@ -39,7 +31,7 @@ pub fn open_editor_with_tempfile() -> Result<TempFileGuard> {
     if !status.success() {
         bail!("editor exited with status {status}");
     }
-    Ok(TempFileGuard::new(path))
+    Ok(TempFileGuard { file })
 }
 
 pub fn parse_editor_command(input: &str) -> Result<(String, Vec<String>)> {
@@ -112,7 +104,7 @@ pub fn build_status_line(args: &Args, record_path: Option<&PathBuf>) -> String {
     parts.join(" | ")
 }
 
-pub fn resolve_record_path(targets_path: &PathBuf, record_path: Option<&PathBuf>) -> PathBuf {
+pub fn resolve_record_path(targets_path: &Path, record_path: Option<&PathBuf>) -> PathBuf {
     if let Some(path) = record_path {
         return path.clone();
     }

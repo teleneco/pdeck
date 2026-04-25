@@ -25,6 +25,17 @@ enum IcmpBackend {
 
 type ProbeResult = (String, String, f64, Option<String>);
 
+struct ProbeWorker {
+    index: usize,
+    target: Target,
+    args: Args,
+    client: reqwest::Client,
+    tx: mpsc::Sender<ProbeEvent>,
+    pause_rx: watch::Receiver<bool>,
+    semaphore: Arc<Semaphore>,
+    icmp_backend: IcmpBackend,
+}
+
 pub async fn probe_loop(
     args: Args,
     targets: Vec<Target>,
@@ -45,7 +56,7 @@ pub async fn probe_loop(
         let pause_rx = pause_rx.clone();
         let semaphore = semaphore.clone();
         tokio::spawn(async move {
-            run_probe_worker(
+            run_probe_worker(ProbeWorker {
                 index,
                 target,
                 args,
@@ -54,7 +65,7 @@ pub async fn probe_loop(
                 pause_rx,
                 semaphore,
                 icmp_backend,
-            )
+            })
             .await;
         });
     }
@@ -62,16 +73,17 @@ pub async fn probe_loop(
     Ok(())
 }
 
-async fn run_probe_worker(
-    index: usize,
-    target: Target,
-    args: Args,
-    client: reqwest::Client,
-    tx: mpsc::Sender<ProbeEvent>,
-    mut pause_rx: watch::Receiver<bool>,
-    semaphore: Arc<Semaphore>,
-    icmp_backend: IcmpBackend,
-) {
+async fn run_probe_worker(worker: ProbeWorker) {
+    let ProbeWorker {
+        index,
+        target,
+        args,
+        client,
+        tx,
+        mut pause_rx,
+        semaphore,
+        icmp_backend,
+    } = worker;
     if matches!(target.kind, TargetKind::Icmp) {
         match icmp_backend {
             IcmpBackend::Exec => run_icmp_exec_worker(index, target, args, tx, pause_rx).await,
@@ -229,11 +241,11 @@ async fn run_icmp_exec_worker(
                             if let Some(resolved_ip) = parse_ping_output_ip(&line) {
                                 last_resolved_ip = Some(resolved_ip);
                             }
-                            if let Some(event) = build_icmp_event_from_line(index, &target, &line, last_resolved_ip.clone()) {
-                                if tx.send(event).await.is_err() {
-                                    let _ = child.kill().await;
-                                    return;
-                                }
+                            if let Some(event) = build_icmp_event_from_line(index, &target, &line, last_resolved_ip.clone())
+                                && tx.send(event).await.is_err()
+                            {
+                                let _ = child.kill().await;
+                                return;
                             }
                         }
                         Ok(None) => {
@@ -390,7 +402,7 @@ async fn probe_icmp_exec(target: &Target, timeout: Duration) -> Result<ProbeResu
 
     let elapsed = start.elapsed();
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let rtt_ms = parse_ping_time(&stdout).unwrap_or_else(|| elapsed.as_secs_f64() * 1000.0);
+    let rtt_ms = parse_ping_time(&stdout).unwrap_or(elapsed.as_secs_f64() * 1000.0);
     let resolved_ip = parse_ping_output_ip(&stdout).or(fallback_resolved_ip);
     Ok(("o".to_string(), format_rtt_ms(rtt_ms), rtt_ms, resolved_ip))
 }
