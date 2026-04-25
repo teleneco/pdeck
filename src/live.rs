@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::io::{self, Write};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -49,6 +50,37 @@ pub async fn run_app(
                     return Ok(());
                 }
                 terminal.draw(|frame| ui::draw_ui(frame, app))?;
+            }
+        }
+    }
+}
+
+pub async fn run_no_tui_app(app: &mut App, mut record_file: Option<&mut File>) -> Result<()> {
+    let (tx, mut rx) = mpsc::channel(256);
+    let (_pause_tx, pause_rx) = watch::channel(false);
+    let args = app.args.clone();
+    let targets = app.targets.clone();
+    tokio::spawn(async move {
+        let _ = probe::probe_loop(args, targets, tx, pause_rx).await;
+    });
+
+    let mut stdout = io::stdout().lock();
+    loop {
+        tokio::select! {
+            event = rx.recv() => {
+                let Some(event) = event else {
+                    return Ok(());
+                };
+                app.apply_probe_event(&event);
+                stdout.write_all(event.log_line.as_bytes())?;
+                stdout.flush()?;
+                if let Some(file) = record_file.as_deref_mut() {
+                    append_record_event(file, &event)?;
+                }
+            }
+            signal = tokio::signal::ctrl_c() => {
+                signal?;
+                return Ok(());
             }
         }
     }

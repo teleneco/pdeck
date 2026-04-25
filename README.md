@@ -77,6 +77,7 @@ If you want to read macOS `arp -a` style output directly, use `-A`.
 -c, --concurrency <N>     Maximum concurrent TCP/HTTP probes
 --icmp-backend <BACKEND>  auto, exec, or api
 --record [FILE]           Write JSONL session events
+--no-tui                  Print live probe results without opening the TUI
 ```
 
 Recorded sessions are handled with subcommands:
@@ -119,6 +120,13 @@ cargo run -- --record session.jsonl
 
 When no record path is provided, the target file stem is included in the
 generated file name, such as `targets_20260425_120000.jsonl`.
+
+Run live probes without the TUI:
+
+```sh
+cargo run -- -f targets.txt --no-tui
+cargo run -- -f targets.txt --no-tui --record
+```
 
 Replay a recorded session:
 

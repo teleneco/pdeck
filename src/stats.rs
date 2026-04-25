@@ -168,6 +168,7 @@ fn stats_args(replay_path: PathBuf) -> Args {
         concurrency: 16,
         icmp_backend: crate::cli::IcmpBackendArg::Auto,
         record: None,
+        no_tui: false,
         replay: Some(replay_path),
         log: None,
         stats: None,

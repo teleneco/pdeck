@@ -42,6 +42,9 @@ pub struct Args {
     #[arg(long, num_args = 0..=1, value_name = "FILE")]
     pub record: Option<Option<PathBuf>>,
 
+    #[arg(long)]
+    pub no_tui: bool,
+
     #[arg(long, hide = true)]
     pub replay: Option<PathBuf>,
 

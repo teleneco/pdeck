@@ -17,7 +17,7 @@ use clap::Parser;
 
 use crate::cli::{Args, Command};
 use crate::config::{build_status_line, open_editor_with_tempfile, resolve_record_path};
-use crate::live::run_app;
+use crate::live::{run_app, run_no_tui_app};
 use crate::log::{init_text_log_file, resolve_log_path, write_log_from_record};
 use crate::model::App;
 use crate::record::{init_record_file, read_session_header};
@@ -107,6 +107,15 @@ async fn run_legacy_or_live(args: &mut Args) -> Result<()> {
         };
         let stats_path = resolve_stats_path(replay_path, stats_arg.as_ref());
         return write_stats_from_record(replay_path, &stats_path);
+    }
+
+    if args.no_tui && args.replay.is_none() {
+        let mut record_file = if let Some(record_path) = &record_path {
+            Some(init_record_file(record_path, &app.targets)?)
+        } else {
+            None
+        };
+        return run_no_tui_app(&mut app, record_file.as_mut()).await;
     }
 
     let mut terminal = ui::init_terminal()?;
