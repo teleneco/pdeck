@@ -164,7 +164,6 @@ fn stats_args(replay_path: PathBuf) -> Args {
         timeout: crate::cli::DurationArg(std::time::Duration::from_secs(3)),
         file: PathBuf::from("targets.txt"),
         arp_entries: false,
-        vi_mode: false,
         concurrency: 16,
         icmp_backend: crate::cli::IcmpBackendArg::Auto,
         record: None,

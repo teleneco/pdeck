@@ -30,9 +30,6 @@ pub struct Args {
     #[arg(short = 'A')]
     pub arp_entries: bool,
 
-    #[arg(short = 'V')]
-    pub vi_mode: bool,
-
     #[arg(short = 'c', long, default_value_t = 16)]
     pub concurrency: usize,
 

@@ -16,7 +16,7 @@ use anyhow::{Context, Result, bail};
 use clap::Parser;
 
 use crate::cli::{Args, Command};
-use crate::config::{build_status_line, open_editor_with_tempfile, resolve_record_path};
+use crate::config::{build_status_line, resolve_record_path};
 use crate::live::{run_app, run_no_tui_app};
 use crate::log::{init_text_log_file, resolve_log_path, write_log_from_record};
 use crate::model::App;
@@ -85,13 +85,6 @@ async fn run_replay_command(mut args: Args, replay_path: PathBuf) -> Result<()> 
 }
 
 async fn run_legacy_or_live(args: &mut Args) -> Result<()> {
-    let mut temp_file = None;
-    if args.vi_mode {
-        let guard = open_editor_with_tempfile().context("failed to create temporary ping list")?;
-        args.file = guard.path().to_path_buf();
-        temp_file = Some(guard);
-    }
-
     let targets = if let Some(replay_path) = &args.replay {
         read_session_header(replay_path)?
     } else {
@@ -123,16 +116,20 @@ async fn run_legacy_or_live(args: &mut Args) -> Result<()> {
                 record_path,
                 &app.targets,
                 args.record_overwrite,
+                matches!(args.record, Some(None)),
                 args.record_size_limit,
             )?)
         } else {
             None
         };
+        if let Some(record_file) = &record_file {
+            app.status_line = build_status_line(args, Some(&record_file.path().to_path_buf()));
+        }
         return run_no_tui_app(&mut app, record_file.as_mut()).await;
     }
 
     let mut terminal_guard = ui::TerminalGuard::new()?;
-    let result = if let Some(replay_path) = &args.replay {
+    if let Some(replay_path) = &args.replay {
         let mut log_file = if let Some(log_path) = &args.log {
             Some(init_text_log_file(log_path)?)
         } else {
@@ -151,11 +148,15 @@ async fn run_legacy_or_live(args: &mut Args) -> Result<()> {
                 record_path,
                 &app.targets,
                 args.record_overwrite,
+                matches!(args.record, Some(None)),
                 args.record_size_limit,
             )?)
         } else {
             None
         };
+        if let Some(record_file) = &record_file {
+            app.status_line = build_status_line(args, Some(&record_file.path().to_path_buf()));
+        }
         let mut log_file = if let Some(log_path) = &args.log {
             Some(init_text_log_file(log_path)?)
         } else {
@@ -168,8 +169,5 @@ async fn run_legacy_or_live(args: &mut Args) -> Result<()> {
             log_file.as_mut(),
         )
         .await
-    };
-    drop(temp_file);
-
-    result
+    }
 }

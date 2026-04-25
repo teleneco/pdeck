@@ -47,7 +47,7 @@ pub async fn probe_loop(
         .timeout(args.timeout.0)
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()
-        .expect("failed to build http client");
+        .context("failed to build http client")?;
     let semaphore = Arc::new(Semaphore::new(args.concurrency.max(1)));
     for (index, target) in targets.into_iter().enumerate() {
         let tx = tx.clone();
@@ -507,6 +507,12 @@ fn probe_icmp_api_blocking(host: &str, timeout: Duration) -> Result<ProbeResult>
     if reply.status != IP_SUCCESS {
         bail!("icmp status {}", reply.status);
     }
+    if reply.data_size as usize > PAYLOAD.len() {
+        bail!("icmp reply data exceeded request payload size");
+    }
+    if reply.data_size > 0 && reply.data.is_null() {
+        bail!("icmp reply data pointer was null");
+    }
 
     let rtt_ms = reply.round_trip_time as f64;
     Ok((
@@ -568,8 +574,42 @@ fn exec_timeout_arg(timeout: Duration) -> String {
 }
 
 fn validate_icmp_exec_host(host: &str) -> Result<()> {
+    if host.is_empty() {
+        bail!("icmp target must not be empty");
+    }
     if host.starts_with('-') {
         bail!("icmp target must not start with '-'");
+    }
+    if host.chars().any(|ch| ch.is_whitespace() || ch.is_control()) {
+        bail!("icmp target must not contain whitespace or control characters");
+    }
+    if !host.is_ascii() {
+        bail!("icmp target must be ASCII");
+    }
+    if host.parse::<IpAddr>().is_ok() {
+        return Ok(());
+    }
+    if host.chars().any(|ch| {
+        matches!(
+            ch,
+            '/' | '\\' | ';' | '&' | '|' | '$' | '`' | '"' | '\'' | '<' | '>' | '(' | ')'
+        )
+    }) {
+        bail!("icmp target contains unsupported shell metacharacters");
+    }
+    if !host
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-'))
+    {
+        bail!("icmp target must be a hostname or IP address");
+    }
+    for label in host.split('.') {
+        if label.is_empty() {
+            bail!("icmp target hostname contains an empty label");
+        }
+        if label.starts_with('-') || label.ends_with('-') {
+            bail!("icmp target hostname labels must not start or end with '-'");
+        }
     }
     Ok(())
 }
@@ -878,5 +918,24 @@ mod tests {
     fn rejects_icmp_exec_targets_that_look_like_options() {
         let err = validate_icmp_exec_host("-i").unwrap_err();
         assert!(err.to_string().contains("must not start with '-'"));
+    }
+
+    #[test]
+    fn rejects_icmp_exec_targets_with_whitespace() {
+        let err = validate_icmp_exec_host("example.com -i 1").unwrap_err();
+        assert!(err.to_string().contains("whitespace"));
+    }
+
+    #[test]
+    fn rejects_icmp_exec_targets_with_shell_metacharacters() {
+        let err = validate_icmp_exec_host("example.com;touch").unwrap_err();
+        assert!(err.to_string().contains("metacharacters"));
+    }
+
+    #[test]
+    fn accepts_icmp_exec_hostname_and_ip_literals() {
+        validate_icmp_exec_host("router.local").unwrap();
+        validate_icmp_exec_host("192.168.1.1").unwrap();
+        validate_icmp_exec_host("2606:2800:220:1:248:1893:25c8:1946").unwrap();
     }
 }

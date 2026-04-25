@@ -30,14 +30,6 @@ Run with a different target file:
 cargo run -- -f targets-mixed.txt
 ```
 
-Open an editor and type targets into a temporary file:
-
-```sh
-cargo run -- -V
-```
-
-If `EDITOR` is not set, `pdeck` uses `vi`.
-
 ## Target File Format
 
 Each non-empty line is:
@@ -75,7 +67,6 @@ If you want to read macOS `arp -a` style output directly, use `-A`.
 -i <DURATION>             Probe interval, default 500ms
 -t <DURATION>             Per-probe timeout, default 3s
 -A                        Parse macOS arp -a style entries
--V                        Open an editor for a temporary target file
 -c, --concurrency <N>     Maximum concurrent TCP/HTTP probes
 --icmp-backend <BACKEND>  auto, exec, or api
 --record [FILE]           Write JSONL session events

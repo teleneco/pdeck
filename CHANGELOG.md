@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Remove the unused `-V`/`EDITOR` target-entry flow.
+- Harden ICMP exec target validation against whitespace and shell
+  metacharacters.
+- Create generated record files with atomic `create_new` collision retries and
+  refuse symlink targets when opening record files.
+- Add stricter replay header errors and additional Windows ICMP reply checks.
 - Make replay, stats, and log conversion skip blank or malformed JSONL event
   lines after a valid session header.
 - Prevent record files from replacing existing paths by default, add

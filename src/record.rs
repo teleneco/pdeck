@@ -1,6 +1,11 @@
 use std::fs::{File, OpenOptions};
+use std::io::ErrorKind;
 use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+#[cfg(windows)]
+use std::os::windows::fs::OpenOptionsExt;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -20,6 +25,7 @@ pub struct SessionEventReader {
 #[derive(Debug)]
 pub struct RecordWriter {
     file: File,
+    path: PathBuf,
     written_bytes: u64,
     size_limit_bytes: u64,
     limit_reached: bool,
@@ -36,19 +42,54 @@ pub fn init_record_file(
     path: &Path,
     targets: &[Target],
     overwrite: bool,
+    avoid_collisions: bool,
+    size_limit_bytes: u64,
+) -> Result<RecordWriter> {
+    if overwrite {
+        return create_record_file(path, targets, true, size_limit_bytes);
+    }
+
+    let mut candidate = path.to_path_buf();
+    for index in 1.. {
+        match create_record_file(&candidate, targets, false, size_limit_bytes) {
+            Ok(writer) => return Ok(writer),
+            Err(err)
+                if avoid_collisions
+                    && err
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|io_err| io_err.kind() == ErrorKind::AlreadyExists) =>
+            {
+                candidate = suffixed_path(path, index + 1);
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    unreachable!("unbounded record file creation loop should always return");
+}
+
+impl RecordWriter {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+fn create_record_file(
+    path: &Path,
+    targets: &[Target],
+    overwrite: bool,
     size_limit_bytes: u64,
 ) -> Result<RecordWriter> {
     let mut options = OpenOptions::new();
     options.write(true);
+    harden_record_open_options(&mut options);
     if overwrite {
         options.create(true).truncate(true);
     } else {
         options.create_new(true);
     }
 
-    let mut file = options
-        .open(path)
-        .with_context(|| format!("failed to open record file {}", path.display()))?;
+    let mut file = options.open(path)?;
     let header = SessionHeader {
         version: 1,
         targets: targets.to_vec(),
@@ -58,10 +99,38 @@ pub fn init_record_file(
     file.flush()?;
     Ok(RecordWriter {
         file,
+        path: path.to_path_buf(),
         written_bytes: header.len() as u64,
         size_limit_bytes,
         limit_reached: false,
     })
+}
+
+fn suffixed_path(path: &Path, index: usize) -> PathBuf {
+    let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("pdeck");
+    let extension = path.extension().and_then(|value| value.to_str());
+    let filename = match extension {
+        Some(extension) => format!("{stem}_{index}.{extension}"),
+        None => format!("{stem}_{index}"),
+    };
+    parent.join(filename)
+}
+
+fn harden_record_open_options(options: &mut OpenOptions) {
+    #[cfg(unix)]
+    {
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
 }
 
 pub fn append_record_event(
@@ -94,6 +163,9 @@ pub fn read_session_header(path: &Path) -> Result<Vec<Target>> {
     let mut reader = BufReader::new(file);
     let mut first_line = String::new();
     reader.read_line(&mut first_line)?;
+    if first_line.trim().is_empty() {
+        bail!("replay header is empty");
+    }
     let header: SessionHeader = serde_json::from_str(first_line.trim_end())?;
     Ok(header.targets)
 }
@@ -107,7 +179,8 @@ pub fn open_session_event_reader(path: &Path) -> Result<SessionEventReader> {
     if first_line.trim().is_empty() {
         bail!("replay header is empty");
     }
-    let _: SessionHeader = serde_json::from_str(first_line.trim_end())?;
+    let _: SessionHeader = serde_json::from_str(first_line.trim_end())
+        .with_context(|| format!("failed to parse replay header in {}", path.display()))?;
     Ok(SessionEventReader { reader })
 }
 
@@ -197,10 +270,26 @@ mod tests {
         ));
         std::fs::write(&path, "existing").unwrap();
 
-        let err = init_record_file(&path, &sample_targets(), false, 0).unwrap_err();
+        let err = init_record_file(&path, &sample_targets(), false, false, 0).unwrap_err();
         let _ = std::fs::remove_file(&path);
 
-        assert!(err.to_string().contains("failed to open record file"));
+        assert_eq!(
+            err.downcast_ref::<std::io::Error>()
+                .map(std::io::Error::kind),
+            Some(std::io::ErrorKind::AlreadyExists)
+        );
+    }
+
+    #[test]
+    fn auto_record_creation_uses_atomic_suffix_on_collision() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("office.jsonl");
+        let second = dir.path().join("office_2.jsonl");
+        std::fs::write(&first, "existing").unwrap();
+
+        let writer = init_record_file(&first, &sample_targets(), false, true, 0).unwrap();
+
+        assert_eq!(writer.path(), second);
     }
 
     #[test]
@@ -208,7 +297,7 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("pdeck-limited-record-{}.jsonl", std::process::id()));
         let _ = std::fs::remove_file(&path);
-        let mut writer = init_record_file(&path, &sample_targets(), false, 130).unwrap();
+        let mut writer = init_record_file(&path, &sample_targets(), false, false, 130).unwrap();
 
         let status = append_record_event(&mut writer, &sample_event()).unwrap();
         let stopped = append_record_event(&mut writer, &sample_event()).unwrap();
@@ -216,6 +305,43 @@ mod tests {
 
         assert_eq!(status, RecordWriteStatus::LimitReached);
         assert_eq!(stopped, RecordWriteStatus::AlreadyStopped);
+    }
+
+    #[test]
+    fn rejects_malformed_session_header() {
+        let path =
+            std::env::temp_dir().join(format!("pdeck-bad-header-{}.jsonl", std::process::id()));
+        std::fs::write(
+            &path,
+            concat!(
+                "not-json\n",
+                "{\"index\":0,\"status\":\"o\",\"target\":\"example.com\",\"resolved_ip\":null,\"response\":\"ok\",\"log_line\":\"ok\\n\",\"ok\":true,\"rtt_ms\":1.0,\"ts_ms\":1}\n",
+            ),
+        )
+        .unwrap();
+
+        let err = read_session_events(&path).unwrap_err();
+        let _ = std::fs::remove_file(&path);
+
+        assert!(err.to_string().contains("failed to parse replay header"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn record_overwrite_refuses_symlink_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let real_path = dir.path().join("real.jsonl");
+        let link_path = dir.path().join("link.jsonl");
+        std::fs::write(&real_path, "existing").unwrap();
+        std::os::unix::fs::symlink(&real_path, &link_path).unwrap();
+
+        let err = init_record_file(&link_path, &sample_targets(), true, false, 0).unwrap_err();
+
+        assert_eq!(
+            err.downcast_ref::<std::io::Error>()
+                .and_then(std::io::Error::raw_os_error),
+            Some(libc::ELOOP)
+        );
     }
 
     fn sample_targets() -> Vec<Target> {
