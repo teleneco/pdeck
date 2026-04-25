@@ -77,9 +77,14 @@ If you want to read macOS `arp -a` style output directly, use `-A`.
 -c, --concurrency <N>     Maximum concurrent TCP/HTTP probes
 --icmp-backend <BACKEND>  auto, exec, or api
 --record [FILE]           Write JSONL session events
---replay <FILE>           Replay JSONL session events
---log <FILE>              Write human-readable text log
---stats [FILE]            Convert a replay JSONL file to per-host CSV statistics
+```
+
+Recorded sessions are handled with subcommands:
+
+```sh
+pdeck replay <FILE>
+pdeck stats <FILE> [-o FILE]
+pdeck log <FILE> [-o FILE]
 ```
 
 ICMP backend defaults:
@@ -118,7 +123,7 @@ generated file name, such as `targets_20260425_120000.jsonl`.
 Replay a recorded session:
 
 ```sh
-cargo run -- --replay session.jsonl
+cargo run -- replay session.jsonl
 ```
 
 Replay controls:
@@ -128,17 +133,18 @@ Replay controls:
 - `Left`/`Right`: skip backward/forward 10 seconds
 - `Shift+Left`/`Shift+Right`: skip backward/forward 60 seconds
 
-Replay and also write a text log:
+Convert a recorded session to a text log:
 
 ```sh
-cargo run -- --replay session.jsonl --log replay.log
+cargo run -- log session.jsonl
+cargo run -- log session.jsonl -o replay.log
 ```
 
 Convert a recorded JSONL session to per-host CSV statistics:
 
 ```sh
-cargo run -- --replay session.jsonl --stats
-cargo run -- --replay session.jsonl --stats session-stats.csv
+cargo run -- stats session.jsonl
+cargo run -- stats session.jsonl -o session-stats.csv
 ```
 
 This conversion reads the full recorded session and exits without opening the
