@@ -98,6 +98,9 @@ pub fn build_status_line(args: &Args, record_path: Option<&PathBuf>) -> String {
     if let Some(record_path) = record_path {
         parts.push(format!("record: {}", record_path.display()));
     }
+    if args.record_size_limit > 0 {
+        parts.push(format!("record-limit: {} bytes", args.record_size_limit));
+    }
     if let Some(log_path) = &args.log {
         parts.push(format!("log: {}", log_path.display()));
     }
@@ -114,18 +117,45 @@ pub fn resolve_record_path(targets_path: &Path, record_path: Option<&PathBuf>) -
         .and_then(|value| value.to_str())
         .filter(|value| !value.is_empty())
         .unwrap_or("pdeck");
-    PathBuf::from(format!(
+    unique_record_path(PathBuf::from(format!(
         "{}_{}.jsonl",
         stem,
         Local::now().format("%Y%m%d_%H%M%S")
-    ))
+    )))
+}
+
+fn unique_record_path(path: PathBuf) -> PathBuf {
+    if !path.exists() {
+        return path;
+    }
+
+    let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("pdeck");
+    let extension = path.extension().and_then(|value| value.to_str());
+
+    for index in 2.. {
+        let filename = match extension {
+            Some(extension) => format!("{stem}_{index}.{extension}"),
+            None => format!("{stem}_{index}"),
+        };
+        let candidate = parent.join(filename);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    unreachable!("unbounded record path search should always return");
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use super::{parse_editor_command, resolve_record_path};
+    use super::{parse_editor_command, resolve_record_path, unique_record_path};
 
     #[test]
     fn parses_editor_command_with_args() {
@@ -167,5 +197,15 @@ mod tests {
             ),
             PathBuf::from("custom.jsonl")
         );
+    }
+
+    #[test]
+    fn avoids_existing_auto_record_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("office_20260425_120000.jsonl");
+        let second = dir.path().join("office_20260425_120000_2.jsonl");
+        std::fs::write(&first, "existing").unwrap();
+
+        assert_eq!(unique_record_path(first), second);
     }
 }

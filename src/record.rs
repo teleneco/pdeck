@@ -1,6 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -17,29 +17,78 @@ pub struct SessionEventReader {
     reader: BufReader<File>,
 }
 
-pub fn init_record_file(path: &PathBuf, targets: &[Target]) -> Result<File> {
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
+#[derive(Debug)]
+pub struct RecordWriter {
+    file: File,
+    written_bytes: u64,
+    size_limit_bytes: u64,
+    limit_reached: bool,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum RecordWriteStatus {
+    Written,
+    LimitReached,
+    AlreadyStopped,
+}
+
+pub fn init_record_file(
+    path: &Path,
+    targets: &[Target],
+    overwrite: bool,
+    size_limit_bytes: u64,
+) -> Result<RecordWriter> {
+    let mut options = OpenOptions::new();
+    options.write(true);
+    if overwrite {
+        options.create(true).truncate(true);
+    } else {
+        options.create_new(true);
+    }
+
+    let mut file = options
         .open(path)
         .with_context(|| format!("failed to open record file {}", path.display()))?;
     let header = SessionHeader {
         version: 1,
         targets: targets.to_vec(),
     };
-    writeln!(file, "{}", serde_json::to_string(&header)?)?;
+    let header = format!("{}\n", serde_json::to_string(&header)?);
+    file.write_all(header.as_bytes())?;
     file.flush()?;
-    Ok(file)
+    Ok(RecordWriter {
+        file,
+        written_bytes: header.len() as u64,
+        size_limit_bytes,
+        limit_reached: false,
+    })
 }
 
-pub fn append_record_event(file: &mut File, event: &ProbeEvent) -> Result<()> {
-    writeln!(file, "{}", serde_json::to_string(event)?)?;
-    file.flush()?;
-    Ok(())
+pub fn append_record_event(
+    writer: &mut RecordWriter,
+    event: &ProbeEvent,
+) -> Result<RecordWriteStatus> {
+    if writer.limit_reached {
+        return Ok(RecordWriteStatus::AlreadyStopped);
+    }
+
+    let line = format!("{}\n", serde_json::to_string(event)?);
+    let line_len = line.len() as u64;
+    if writer.size_limit_bytes > 0
+        && writer.written_bytes.saturating_add(line_len) > writer.size_limit_bytes
+    {
+        writer.limit_reached = true;
+        writer.file.flush()?;
+        return Ok(RecordWriteStatus::LimitReached);
+    }
+
+    writer.file.write_all(line.as_bytes())?;
+    writer.file.flush()?;
+    writer.written_bytes = writer.written_bytes.saturating_add(line_len);
+    Ok(RecordWriteStatus::Written)
 }
 
-pub fn read_session_header(path: &PathBuf) -> Result<Vec<Target>> {
+pub fn read_session_header(path: &Path) -> Result<Vec<Target>> {
     let file = File::open(path)
         .with_context(|| format!("failed to open replay file {}", path.display()))?;
     let mut reader = BufReader::new(file);
@@ -49,7 +98,7 @@ pub fn read_session_header(path: &PathBuf) -> Result<Vec<Target>> {
     Ok(header.targets)
 }
 
-pub fn open_session_event_reader(path: &PathBuf) -> Result<SessionEventReader> {
+pub fn open_session_event_reader(path: &Path) -> Result<SessionEventReader> {
     let file = File::open(path)
         .with_context(|| format!("failed to open replay file {}", path.display()))?;
     let mut reader = BufReader::new(file);
@@ -62,7 +111,7 @@ pub fn open_session_event_reader(path: &PathBuf) -> Result<SessionEventReader> {
     Ok(SessionEventReader { reader })
 }
 
-pub fn read_session_events(path: &PathBuf) -> Result<Vec<ProbeEvent>> {
+pub fn read_session_events(path: &Path) -> Result<Vec<ProbeEvent>> {
     let mut reader = open_session_event_reader(path)?;
     let mut events = Vec::new();
     while let Some(event) = reader.read_next_event()? {
@@ -82,7 +131,10 @@ impl SessionEventReader {
             if line.trim().is_empty() {
                 continue;
             }
-            return Ok(Some(serde_json::from_str::<ProbeEvent>(line.trim_end())?));
+            match serde_json::from_str::<ProbeEvent>(line.trim_end()) {
+                Ok(event) => return Ok(Some(event)),
+                Err(_) => continue,
+            }
         }
     }
 }
@@ -91,7 +143,12 @@ impl SessionEventReader {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use super::{read_session_events, read_session_header};
+    use crate::model::{ProbeEvent, Target, TargetKind};
+
+    use super::{
+        RecordWriteStatus, append_record_event, init_record_file, read_session_events,
+        read_session_header,
+    };
 
     #[test]
     fn reads_cross_platform_replay_fixture() {
@@ -105,6 +162,83 @@ mod tests {
         assert_eq!(events[4].response, "Request timed out.");
         assert_eq!(events[6].response, "2.1ms");
         assert_eq!(events.iter().filter(|event| event.ok).count(), 4);
+    }
+
+    #[test]
+    fn skips_blank_and_malformed_event_lines() {
+        let path =
+            std::env::temp_dir().join(format!("pdeck-damaged-jsonl-{}.jsonl", std::process::id()));
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"version\":1,\"targets\":[{\"display\":\"example.com\",\"host\":\"example.com\",\"kind\":\"Icmp\",\"description\":\"web\"}]}\n",
+                "\n",
+                "not-json\n",
+                "{\"index\":0,\"status\":\"o\",\"target\":\"example.com\",\"resolved_ip\":null,\"response\":\"ok\",\"log_line\":\"ok\\n\",\"ok\":true,\"rtt_ms\":1.0,\"ts_ms\":1}\n",
+                "{\"index\":\"bad\"}\n",
+                "{\"index\":0,\"status\":\"x\",\"target\":\"example.com\",\"resolved_ip\":null,\"response\":\"timeout\",\"log_line\":\"timeout\\n\",\"ok\":false,\"rtt_ms\":null,\"ts_ms\":2}\n",
+            ),
+        )
+        .unwrap();
+
+        let events = read_session_events(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(events.len(), 2);
+        assert!(events[0].ok);
+        assert!(!events[1].ok);
+    }
+
+    #[test]
+    fn refuses_to_replace_existing_record_without_overwrite() {
+        let path = std::env::temp_dir().join(format!(
+            "pdeck-existing-record-{}.jsonl",
+            std::process::id()
+        ));
+        std::fs::write(&path, "existing").unwrap();
+
+        let err = init_record_file(&path, &sample_targets(), false, 0).unwrap_err();
+        let _ = std::fs::remove_file(&path);
+
+        assert!(err.to_string().contains("failed to open record file"));
+    }
+
+    #[test]
+    fn stops_recording_events_when_size_limit_is_reached() {
+        let path =
+            std::env::temp_dir().join(format!("pdeck-limited-record-{}.jsonl", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut writer = init_record_file(&path, &sample_targets(), false, 130).unwrap();
+
+        let status = append_record_event(&mut writer, &sample_event()).unwrap();
+        let stopped = append_record_event(&mut writer, &sample_event()).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(status, RecordWriteStatus::LimitReached);
+        assert_eq!(stopped, RecordWriteStatus::AlreadyStopped);
+    }
+
+    fn sample_targets() -> Vec<Target> {
+        vec![Target {
+            display: "example.com".to_string(),
+            host: "example.com".to_string(),
+            kind: TargetKind::Icmp,
+            description: "web".to_string(),
+        }]
+    }
+
+    fn sample_event() -> ProbeEvent {
+        ProbeEvent {
+            index: 0,
+            status: "o".to_string(),
+            target: "example.com".to_string(),
+            resolved_ip: None,
+            response: "ok".to_string(),
+            log_line: "ok\n".to_string(),
+            ok: true,
+            rtt_ms: Some(1.0),
+            ts_ms: 1,
+        }
     }
 
     fn fixture_path(name: &str) -> PathBuf {

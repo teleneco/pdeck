@@ -9,13 +9,13 @@ use tokio::sync::{mpsc, watch};
 use crate::log::append_text_log_event;
 use crate::model::App;
 use crate::probe;
-use crate::record::append_record_event;
+use crate::record::{RecordWriteStatus, RecordWriter, append_record_event};
 use crate::ui;
 
 pub async fn run_app(
     terminal: &mut ratatui::DefaultTerminal,
     app: &mut App,
-    mut record_file: Option<&mut File>,
+    mut record_file: Option<&mut RecordWriter>,
     mut log_file: Option<&mut File>,
 ) -> Result<()> {
     const UI_TICK_MS: u64 = 33;
@@ -31,8 +31,10 @@ pub async fn run_app(
         let mut dirty = false;
         while let Ok(event) = rx.try_recv() {
             app.apply_probe_event(&event);
-            if let Some(file) = record_file.as_deref_mut() {
-                append_record_event(file, &event)?;
+            if let Some(file) = record_file.as_deref_mut()
+                && append_record_event(file, &event)? == RecordWriteStatus::LimitReached
+            {
+                app.status_line.push_str(" | record limit reached");
             }
             if let Some(file) = log_file.as_deref_mut() {
                 append_text_log_event(file, &event)?;
@@ -55,7 +57,10 @@ pub async fn run_app(
     }
 }
 
-pub async fn run_no_tui_app(app: &mut App, mut record_file: Option<&mut File>) -> Result<()> {
+pub async fn run_no_tui_app(
+    app: &mut App,
+    mut record_file: Option<&mut RecordWriter>,
+) -> Result<()> {
     let (tx, mut rx) = mpsc::channel(256);
     let (_pause_tx, pause_rx) = watch::channel(false);
     let args = app.args.clone();
@@ -74,8 +79,10 @@ pub async fn run_no_tui_app(app: &mut App, mut record_file: Option<&mut File>) -
                 app.apply_probe_event(&event);
                 stdout.write_all(event.log_line.as_bytes())?;
                 stdout.flush()?;
-                if let Some(file) = record_file.as_deref_mut() {
-                    append_record_event(file, &event)?;
+                if let Some(file) = record_file.as_deref_mut()
+                    && append_record_event(file, &event)? == RecordWriteStatus::LimitReached
+                {
+                    eprintln!("record size limit reached; stopped writing record events");
                 }
             }
             signal = tokio::signal::ctrl_c() => {

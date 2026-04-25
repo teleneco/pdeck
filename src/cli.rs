@@ -43,6 +43,12 @@ pub struct Args {
     pub record: Option<Option<PathBuf>>,
 
     #[arg(long)]
+    pub record_overwrite: bool,
+
+    #[arg(long, default_value_t = 0, value_name = "BYTES")]
+    pub record_size_limit: u64,
+
+    #[arg(long)]
     pub no_tui: bool,
 
     #[arg(long, hide = true)]

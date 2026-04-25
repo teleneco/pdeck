@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
@@ -17,7 +17,7 @@ const REPLAY_UI_TICK_MS: u64 = 33;
 pub async fn run_replay(
     terminal: &mut ratatui::DefaultTerminal,
     app: &mut App,
-    replay_path: &PathBuf,
+    replay_path: &Path,
     mut log_file: Option<&mut File>,
 ) -> Result<()> {
     let (pause_tx, _pause_rx) = watch::channel(false);

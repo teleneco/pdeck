@@ -9,10 +9,10 @@ use crate::cli::Args;
 use crate::model::{App, HostStats};
 use crate::record::{open_session_event_reader, read_session_header};
 
-pub fn write_stats_from_record(replay_path: &PathBuf, stats_path: &PathBuf) -> Result<()> {
+pub fn write_stats_from_record(replay_path: &Path, stats_path: &PathBuf) -> Result<()> {
     let targets = read_session_header(replay_path)?;
     let mut app = App::new(
-        stats_args(replay_path.clone()),
+        stats_args(replay_path.to_path_buf()),
         targets,
         "stats conversion".to_string(),
     );
@@ -168,6 +168,8 @@ fn stats_args(replay_path: PathBuf) -> Args {
         concurrency: 16,
         icmp_backend: crate::cli::IcmpBackendArg::Auto,
         record: None,
+        record_overwrite: false,
+        record_size_limit: 0,
         no_tui: false,
         replay: Some(replay_path),
         log: None,

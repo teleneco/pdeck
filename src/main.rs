@@ -56,6 +56,12 @@ fn validate_args(args: &Args) -> Result<()> {
     if args.replay.is_some() && args.record.is_some() {
         bail!("--record and --replay cannot be used together");
     }
+    if args.record_overwrite && !matches!(args.record, Some(Some(_))) {
+        bail!("--record-overwrite requires --record <FILE>");
+    }
+    if args.record_size_limit > 0 && args.record.is_none() {
+        bail!("--record-size-limit requires --record");
+    }
     if args.stats.is_some() && args.replay.is_none() {
         bail!("--stats requires --replay <FILE>");
     }
@@ -113,7 +119,12 @@ async fn run_legacy_or_live(args: &mut Args) -> Result<()> {
 
     if args.no_tui && args.replay.is_none() {
         let mut record_file = if let Some(record_path) = &record_path {
-            Some(init_record_file(record_path, &app.targets)?)
+            Some(init_record_file(
+                record_path,
+                &app.targets,
+                args.record_overwrite,
+                args.record_size_limit,
+            )?)
         } else {
             None
         };
@@ -136,7 +147,12 @@ async fn run_legacy_or_live(args: &mut Args) -> Result<()> {
         .await
     } else {
         let mut record_file = if let Some(record_path) = &record_path {
-            Some(init_record_file(record_path, &app.targets)?)
+            Some(init_record_file(
+                record_path,
+                &app.targets,
+                args.record_overwrite,
+                args.record_size_limit,
+            )?)
         } else {
             None
         };

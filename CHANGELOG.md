@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Make replay, stats, and log conversion skip blank or malformed JSONL event
+  lines after a valid session header.
+- Prevent record files from replacing existing paths by default, add
+  `--record-overwrite` for explicit replacement, and avoid collisions for
+  generated record names.
+- Add `--record-size-limit BYTES` to stop writing record events after the
+  configured file size is reached while live probing continues.
+
 ## v0.2.0
 
 - Add replay controls for speed changes and 10s/60s seeking.

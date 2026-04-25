@@ -79,6 +79,8 @@ If you want to read macOS `arp -a` style output directly, use `-A`.
 -c, --concurrency <N>     Maximum concurrent TCP/HTTP probes
 --icmp-backend <BACKEND>  auto, exec, or api
 --record [FILE]           Write JSONL session events
+--record-overwrite        Replace an explicit --record file if it already exists
+--record-size-limit BYTES Stop writing record events after this many bytes, default 0
 --no-tui                  Print live probe results without opening the TUI
 ```
 
@@ -122,6 +124,13 @@ cargo run -- --record session.jsonl
 
 When no record path is provided, the target file stem is included in the
 generated file name, such as `targets_20260425_120000.jsonl`.
+Generated record names avoid existing files by adding a numeric suffix when
+needed. Explicit record paths fail if the file already exists unless
+`--record-overwrite` is set.
+
+By default, record files have no size limit. Set `--record-size-limit BYTES` to
+stop writing further record events once the next event would exceed that size.
+Live probing continues after the record limit is reached.
 
 Run live probes without the TUI:
 
@@ -159,6 +168,9 @@ cargo run -- stats session.jsonl -o session-stats.csv
 
 This conversion reads the full recorded session and exits without opening the
 TUI. When no stats path is provided, `session.jsonl` writes `session_stats.csv`.
+Replay, stats, and log conversion skip blank or malformed JSONL event lines
+after the session header, so a partially damaged record can still be used when
+the remaining event lines are valid.
 The stats CSV includes host, last resolved IP, description, packet counts,
 response/loss counts, loss percentage, RTT min/avg/max/stddev, first/last probe
 times, duration, downtime totals, downtime percentage, downtime periods, and the

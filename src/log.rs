@@ -22,7 +22,7 @@ pub fn append_text_log_event(file: &mut File, event: &ProbeEvent) -> Result<()> 
     Ok(())
 }
 
-pub fn write_log_from_record(replay_path: &PathBuf, log_path: &PathBuf) -> Result<()> {
+pub fn write_log_from_record(replay_path: &Path, log_path: &PathBuf) -> Result<()> {
     let mut reader = open_session_event_reader(replay_path)?;
     let mut file = init_text_log_file(log_path)?;
     while let Some(event) = reader.read_next_event()? {
