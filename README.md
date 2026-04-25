@@ -6,6 +6,8 @@
 
 It can mix ICMP, TCP connect, and HTTP/HTTPS checks in a single target file, then show recent status, packet loss, dead hosts, and RTT history in a TUI.
 
+See [CHANGELOG.md](./CHANGELOG.md) for release history.
+
 ## Features
 
 - Mix ICMP, TCP, HTTP, and HTTPS targets in one file

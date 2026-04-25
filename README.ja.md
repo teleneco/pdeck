@@ -6,6 +6,8 @@
 
 1 つの target file に ICMP、TCP connect、HTTP/HTTPS を混在させて、直近の状態、packet loss、dead host、RTT history を TUI で確認できます。
 
+リリース履歴は [CHANGELOG.md](./CHANGELOG.md) を参照してください。
+
 ## 特徴
 
 - ICMP、TCP、HTTP、HTTPS の target を 1 つのファイルに混在できる
