@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.4
 
 - Remove the unused `-V`/`EDITOR` target-entry flow.
 - Harden ICMP exec target validation against whitespace and shell
