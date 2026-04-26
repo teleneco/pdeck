@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Add JSONL format v2 recordings with per-file metadata, `session_id`, and
+  rotated parts.
+- Rotate record output with `--record-size-limit SIZE` instead of stopping
+  event writes at the limit, with byte values and suffixes such as `100mb` and
+  `100mib`.
+- Read v2 rotated sessions as one logical session for replay, stats, and log
+  conversion by discovering matching `.jsonl` files in the same directory.
+- Add `--only <FILE>` to replay, stats, and log for inspecting a single v2 part.
+- Reject existing record base files or matching rotated parts instead of
+  overwriting output.
+
 ## v0.2.4
 
 - Remove the unused `-V`/`EDITOR` target-entry flow.

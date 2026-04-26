@@ -22,7 +22,7 @@ pub enum TargetKind {
     Http { use_tls: bool },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Target {
     pub display: String,
     pub host: String,

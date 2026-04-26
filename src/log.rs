@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::model::ProbeEvent;
-use crate::record::open_session_event_reader;
+use crate::record::{SessionReadMode, read_session_events_with_mode};
 
 pub fn init_text_log_file(path: &PathBuf) -> Result<File> {
     OpenOptions::new()
@@ -22,16 +22,24 @@ pub fn append_text_log_event(file: &mut File, event: &ProbeEvent) -> Result<()> 
     Ok(())
 }
 
-pub fn write_log_from_record(replay_path: &Path, log_path: &PathBuf) -> Result<()> {
-    let mut reader = open_session_event_reader(replay_path)?;
+pub fn write_log_from_record(
+    replay_path: &Path,
+    log_path: &PathBuf,
+    mode: SessionReadMode,
+) -> Result<()> {
+    let session = read_session_events_with_mode(replay_path, mode)?;
     let mut file = init_text_log_file(log_path)?;
-    while let Some(event) = reader.read_next_event()? {
-        append_text_log_event(&mut file, &event)?;
+    for event in session.events {
+        append_text_log_event(&mut file, &event.event)?;
     }
     Ok(())
 }
 
-pub fn resolve_log_path(replay_path: &Path, log_path: Option<&PathBuf>) -> PathBuf {
+pub fn resolve_log_path(
+    replay_path: &Path,
+    log_path: Option<&PathBuf>,
+    mode: SessionReadMode,
+) -> PathBuf {
     if let Some(path) = log_path {
         return path.clone();
     }
@@ -42,6 +50,21 @@ pub fn resolve_log_path(replay_path: &Path, log_path: Option<&PathBuf>) -> PathB
         .and_then(|value| value.to_str())
         .filter(|value| !value.is_empty())
         .unwrap_or("log");
+    let stem = match mode {
+        SessionReadMode::Auto => strip_part_suffix(stem),
+        SessionReadMode::Only => stem,
+    };
     path.set_file_name(format!("{stem}.log"));
     path
+}
+
+fn strip_part_suffix(stem: &str) -> &str {
+    let Some((base, part)) = stem.rsplit_once("_part") else {
+        return stem;
+    };
+    if part.len() == 4 && part.chars().all(|value| value.is_ascii_digit()) {
+        base
+    } else {
+        stem
+    }
 }
