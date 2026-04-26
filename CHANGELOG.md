@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.5
 
 - Add JSONL format v2 recordings with per-file metadata, `session_id`, and
   rotated parts.
