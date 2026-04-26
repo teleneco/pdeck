@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::path::Path;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
@@ -7,8 +7,8 @@ use crossterm::event::{self, Event};
 use tokio::sync::watch;
 
 use crate::log::append_text_log_event;
-use crate::model::{App, ProbeEvent};
-use crate::record::read_session_events;
+use crate::model::App;
+use crate::record::{RecordedEvent, SessionData};
 use crate::ui;
 
 const REPLAY_SPEEDS: [u64; 4] = [1, 2, 5, 10];
@@ -17,20 +17,24 @@ const REPLAY_UI_TICK_MS: u64 = 33;
 pub async fn run_replay(
     terminal: &mut ratatui::DefaultTerminal,
     app: &mut App,
-    replay_path: &Path,
+    session: SessionData,
     mut log_file: Option<&mut File>,
 ) -> Result<()> {
     let (pause_tx, _pause_rx) = watch::channel(false);
-    let events = read_session_events(replay_path)?;
+    let events = session.events;
     if events.is_empty() {
-        bail!("no replay events found in {}", replay_path.display());
+        bail!("no replay events found");
     }
 
-    let start_ts = events.first().map(|event| event.ts_ms).unwrap_or(0);
-    let end_ts = events.last().map(|event| event.ts_ms).unwrap_or(start_ts);
+    let start_ts = events.first().map(|event| event.event.ts_ms).unwrap_or(0);
+    let end_ts = events
+        .last()
+        .map(|event| event.event.ts_ms)
+        .unwrap_or(start_ts);
     let mut replay = ReplayState::new(start_ts, end_ts);
     let mut next_event_index = 0;
-    update_replay_status(app, &replay, replay_path);
+    let mut source = ReplaySource::from_events(&events);
+    update_replay_status(app, &replay, &source);
 
     terminal.draw(|frame| ui::draw_ui(frame, app))?;
 
@@ -38,7 +42,7 @@ pub async fn run_replay(
         let tick_start = Instant::now();
         if event::poll(Duration::from_millis(1))?
             && let Event::Key(key) = event::read()?
-            && handle_replay_key(app, key, &mut replay, replay_path, &pause_tx)?
+            && handle_replay_key(app, key, &mut replay, &source, &pause_tx)?
         {
             return Ok(());
         }
@@ -57,18 +61,19 @@ pub async fn run_replay(
                 next_event_index = rebuild_replay_to(app, &events, target_ts);
             } else {
                 while let Some(event) = events.get(next_event_index) {
-                    if event.ts_ms > target_ts {
+                    if event.event.ts_ms > target_ts {
                         break;
                     }
-                    app.apply_probe_event(event);
+                    app.apply_probe_event(&event.event);
+                    source.update(event);
                     if let Some(file) = log_file.as_deref_mut() {
-                        append_text_log_event(file, event)?;
+                        append_text_log_event(file, &event.event)?;
                     }
                     next_event_index += 1;
                 }
             }
             replay.current_ts = target_ts;
-            update_replay_status(app, &replay, replay_path);
+            update_replay_status(app, &replay, &source);
         }
 
         terminal.draw(|frame| ui::draw_ui(frame, app))?;
@@ -82,6 +87,39 @@ struct ReplayState {
     end_ts: u64,
     speed_index: usize,
     seek_target: Option<u64>,
+}
+
+struct ReplaySource {
+    path: PathBuf,
+    part: Option<u32>,
+    part_count: Option<usize>,
+}
+
+impl ReplaySource {
+    fn from_events(events: &[RecordedEvent]) -> Self {
+        events
+            .first()
+            .map(Self::from_event)
+            .unwrap_or_else(|| Self {
+                path: PathBuf::new(),
+                part: None,
+                part_count: None,
+            })
+    }
+
+    fn from_event(event: &RecordedEvent) -> Self {
+        Self {
+            path: event.source_path.clone(),
+            part: event.part,
+            part_count: event.part_count,
+        }
+    }
+
+    fn update(&mut self, event: &RecordedEvent) {
+        self.path = event.source_path.clone();
+        self.part = event.part;
+        self.part_count = event.part_count;
+    }
 }
 
 impl ReplayState {
@@ -124,7 +162,7 @@ fn handle_replay_key(
     app: &mut App,
     key: crossterm::event::KeyEvent,
     replay: &mut ReplayState,
-    replay_path: &Path,
+    source: &ReplaySource,
     pause_tx: &watch::Sender<bool>,
 ) -> Result<bool> {
     use crossterm::event::{KeyCode, KeyEventKind};
@@ -153,35 +191,41 @@ fn handle_replay_key(
             KeyCode::Left => replay.seek_relative(-10),
             _ => {
                 let quit = ui::handle_key(app, key, pause_tx)?;
-                update_replay_status(app, replay, replay_path);
+                update_replay_status(app, replay, source);
                 return Ok(quit);
             }
         }
-        update_replay_status(app, replay, replay_path);
+        update_replay_status(app, replay, source);
     }
 
     Ok(false)
 }
 
-fn rebuild_replay_to(app: &mut App, events: &[ProbeEvent], target_ts: u64) -> usize {
+fn rebuild_replay_to(app: &mut App, events: &[RecordedEvent], target_ts: u64) -> usize {
     app.reset_probe_state();
     let mut next_event_index = 0;
     for event in events {
-        if event.ts_ms > target_ts {
+        if event.event.ts_ms > target_ts {
             break;
         }
-        app.apply_probe_event(event);
+        app.apply_probe_event(&event.event);
         next_event_index += 1;
     }
     next_event_index
 }
 
-fn update_replay_status(app: &mut App, replay: &ReplayState, replay_path: &Path) {
+fn update_replay_status(app: &mut App, replay: &ReplayState, source: &ReplaySource) {
     let state = if app.paused { "paused" } else { "replay" };
+    let part = match (source.part, source.part_count) {
+        (Some(part), Some(count)) => format!(" | part: {part}/{count}"),
+        (Some(part), None) => format!(" | part: {part}"),
+        _ => String::new(),
+    };
     app.status_line = format!(
-        "{}: {} | speed: x{} | position: {}/{} | Left/Right +/-10s | Shift+Left/Right +/-60s | 1/2/5/0 speed",
+        "{}: {}{} | speed: x{} | position: {}/{} | Left/Right +/-10s | Shift+Left/Right +/-60s | 1/2/5/0 speed",
         state,
-        replay_path.display(),
+        source.path.display(),
+        part,
         replay.speed(),
         format_duration_ms(replay.current_ts.saturating_sub(replay.start_ts)),
         format_duration_ms(replay.end_ts.saturating_sub(replay.start_ts)),

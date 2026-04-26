@@ -14,8 +14,11 @@ pub fn build_status_line(args: &Args, record_path: Option<&PathBuf>) -> String {
     if let Some(record_path) = record_path {
         parts.push(format!("record: {}", record_path.display()));
     }
-    if args.record_size_limit > 0 {
-        parts.push(format!("record-limit: {} bytes", args.record_size_limit));
+    if args.record_size_limit.0 > 0 {
+        parts.push(format!(
+            "record-rotation: {} bytes",
+            args.record_size_limit.0
+        ));
     }
     if let Some(log_path) = &args.log {
         parts.push(format!("log: {}", log_path.display()));

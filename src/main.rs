@@ -20,7 +20,7 @@ use crate::config::{build_status_line, resolve_record_path};
 use crate::live::{run_app, run_no_tui_app};
 use crate::log::{init_text_log_file, resolve_log_path, write_log_from_record};
 use crate::model::App;
-use crate::record::{init_record_file, read_session_header};
+use crate::record::{SessionReadMode, init_record_file, read_session_events_with_mode};
 use crate::replay::run_replay;
 use crate::stats::{resolve_stats_path, write_stats_from_record};
 
@@ -33,16 +33,33 @@ async fn main() -> Result<()> {
     validate_args(&args)?;
 
     match args.command.clone() {
-        Some(Command::Replay { file }) => run_replay_command(args, file).await,
-        Some(Command::Stats { file, output }) => {
-            let stats_path = resolve_stats_path(&file, output.as_ref());
-            write_stats_from_record(&file, &stats_path)
+        Some(Command::Replay { file, only }) => {
+            let (file, mode) = resolve_session_input(file, only)?;
+            run_replay_command(args, file, mode).await
         }
-        Some(Command::Log { file, output }) => {
-            let log_path = resolve_log_path(&file, output.as_ref());
-            write_log_from_record(&file, &log_path)
+        Some(Command::Stats { file, output, only }) => {
+            let (file, mode) = resolve_session_input(file, only)?;
+            let stats_path = resolve_stats_path(&file, output.as_ref(), mode);
+            write_stats_from_record(&file, &stats_path, mode)
+        }
+        Some(Command::Log { file, output, only }) => {
+            let (file, mode) = resolve_session_input(file, only)?;
+            let log_path = resolve_log_path(&file, output.as_ref(), mode);
+            write_log_from_record(&file, &log_path, mode)
         }
         None => run_legacy_or_live(&mut args).await,
+    }
+}
+
+fn resolve_session_input(
+    file: Option<PathBuf>,
+    only: Option<PathBuf>,
+) -> Result<(PathBuf, SessionReadMode)> {
+    match (file, only) {
+        (Some(file), None) => Ok((file, SessionReadMode::Auto)),
+        (None, Some(file)) => Ok((file, SessionReadMode::Only)),
+        (Some(_), Some(_)) => bail!("provide either <FILE> or --only <FILE>, not both"),
+        (None, None) => bail!("missing replay file"),
     }
 }
 
@@ -56,10 +73,10 @@ fn validate_args(args: &Args) -> Result<()> {
     if args.replay.is_some() && args.record.is_some() {
         bail!("--record and --replay cannot be used together");
     }
-    if args.record_overwrite && !matches!(args.record, Some(Some(_))) {
-        bail!("--record-overwrite requires --record <FILE>");
+    if args.record_overwrite {
+        bail!("--record-overwrite is not supported for rotated v2 records");
     }
-    if args.record_size_limit > 0 && args.record.is_none() {
+    if args.record_size_limit.0 > 0 && args.record.is_none() {
         bail!("--record-size-limit requires --record");
     }
     if args.stats.is_some() && args.replay.is_none() {
@@ -71,9 +88,14 @@ fn validate_args(args: &Args) -> Result<()> {
     Ok(())
 }
 
-async fn run_replay_command(mut args: Args, replay_path: PathBuf) -> Result<()> {
+async fn run_replay_command(
+    mut args: Args,
+    replay_path: PathBuf,
+    mode: SessionReadMode,
+) -> Result<()> {
     args.replay = Some(replay_path.clone());
-    let targets = read_session_header(&replay_path)?;
+    let session = read_session_events_with_mode(&replay_path, mode)?;
+    let targets = session.targets.clone();
     if targets.is_empty() {
         bail!("no targets found in {}", replay_path.display());
     }
@@ -81,12 +103,12 @@ async fn run_replay_command(mut args: Args, replay_path: PathBuf) -> Result<()> 
     let status_line = build_status_line(&args, None);
     let mut app = App::new(args, targets, status_line);
     let mut terminal_guard = ui::TerminalGuard::new()?;
-    run_replay(terminal_guard.terminal(), &mut app, &replay_path, None).await
+    run_replay(terminal_guard.terminal(), &mut app, session, None).await
 }
 
 async fn run_legacy_or_live(args: &mut Args) -> Result<()> {
     let targets = if let Some(replay_path) = &args.replay {
-        read_session_header(replay_path)?
+        read_session_events_with_mode(replay_path, SessionReadMode::Auto)?.targets
     } else {
         probe::parse_targets(&args.file, args.arp_entries)
             .with_context(|| format!("failed to read {}", args.file.display()))?
@@ -106,8 +128,8 @@ async fn run_legacy_or_live(args: &mut Args) -> Result<()> {
         let Some(replay_path) = &args.replay else {
             bail!("--stats requires --replay <FILE>");
         };
-        let stats_path = resolve_stats_path(replay_path, stats_arg.as_ref());
-        return write_stats_from_record(replay_path, &stats_path);
+        let stats_path = resolve_stats_path(replay_path, stats_arg.as_ref(), SessionReadMode::Auto);
+        return write_stats_from_record(replay_path, &stats_path, SessionReadMode::Auto);
     }
 
     if args.no_tui && args.replay.is_none() {
@@ -117,7 +139,7 @@ async fn run_legacy_or_live(args: &mut Args) -> Result<()> {
                 &app.targets,
                 args.record_overwrite,
                 matches!(args.record, Some(None)),
-                args.record_size_limit,
+                args.record_size_limit.0,
             )?)
         } else {
             None
@@ -138,7 +160,7 @@ async fn run_legacy_or_live(args: &mut Args) -> Result<()> {
         run_replay(
             terminal_guard.terminal(),
             &mut app,
-            replay_path,
+            read_session_events_with_mode(replay_path, SessionReadMode::Auto)?,
             log_file.as_mut(),
         )
         .await
@@ -149,7 +171,7 @@ async fn run_legacy_or_live(args: &mut Args) -> Result<()> {
                 &app.targets,
                 args.record_overwrite,
                 matches!(args.record, Some(None)),
-                args.record_size_limit,
+                args.record_size_limit.0,
             )?)
         } else {
             None

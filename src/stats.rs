@@ -7,23 +7,30 @@ use chrono::{Local, TimeZone};
 
 use crate::cli::Args;
 use crate::model::{App, HostStats};
-use crate::record::{open_session_event_reader, read_session_header};
+use crate::record::{SessionReadMode, read_session_events_with_mode};
 
-pub fn write_stats_from_record(replay_path: &Path, stats_path: &PathBuf) -> Result<()> {
-    let targets = read_session_header(replay_path)?;
+pub fn write_stats_from_record(
+    replay_path: &Path,
+    stats_path: &PathBuf,
+    mode: SessionReadMode,
+) -> Result<()> {
+    let session = read_session_events_with_mode(replay_path, mode)?;
     let mut app = App::new(
         stats_args(replay_path.to_path_buf()),
-        targets,
+        session.targets,
         "stats conversion".to_string(),
     );
-    let mut reader = open_session_event_reader(replay_path)?;
-    while let Some(event) = reader.read_next_event()? {
-        app.apply_probe_event(&event);
+    for event in session.events {
+        app.apply_probe_event(&event.event);
     }
     write_stats_csv(stats_path, &app)
 }
 
-pub fn resolve_stats_path(replay_path: &Path, stats_path: Option<&PathBuf>) -> PathBuf {
+pub fn resolve_stats_path(
+    replay_path: &Path,
+    stats_path: Option<&PathBuf>,
+    mode: SessionReadMode,
+) -> PathBuf {
     if let Some(path) = stats_path {
         return path.clone();
     }
@@ -34,8 +41,23 @@ pub fn resolve_stats_path(replay_path: &Path, stats_path: Option<&PathBuf>) -> P
         .and_then(|value| value.to_str())
         .filter(|value| !value.is_empty())
         .unwrap_or("stats");
+    let stem = match mode {
+        SessionReadMode::Auto => strip_part_suffix(stem),
+        SessionReadMode::Only => stem,
+    };
     path.set_file_name(format!("{stem}_stats.csv"));
     path
+}
+
+fn strip_part_suffix(stem: &str) -> &str {
+    let Some((base, part)) = stem.rsplit_once("_part") else {
+        return stem;
+    };
+    if part.len() == 4 && part.chars().all(|value| value.is_ascii_digit()) {
+        base
+    } else {
+        stem
+    }
 }
 
 fn write_stats_csv(path: &PathBuf, app: &App) -> Result<()> {
@@ -168,7 +190,7 @@ fn stats_args(replay_path: PathBuf) -> Args {
         icmp_backend: crate::cli::IcmpBackendArg::Auto,
         record: None,
         record_overwrite: false,
-        record_size_limit: 0,
+        record_size_limit: crate::cli::SizeArg(0),
         no_tui: false,
         replay: Some(replay_path),
         log: None,
@@ -180,24 +202,47 @@ fn stats_args(replay_path: PathBuf) -> Args {
 mod tests {
     use std::path::{Path, PathBuf};
 
+    use crate::record::SessionReadMode;
+
     use super::{resolve_stats_path, write_stats_from_record};
 
     #[test]
     fn derives_stats_path_from_replay_path() {
         assert_eq!(
-            resolve_stats_path(&PathBuf::from("session.jsonl"), None),
+            resolve_stats_path(&PathBuf::from("session.jsonl"), None, SessionReadMode::Auto),
             PathBuf::from("session_stats.csv")
         );
         assert_eq!(
-            resolve_stats_path(&PathBuf::from("logs/session.json"), None),
+            resolve_stats_path(
+                &PathBuf::from("logs/session.json"),
+                None,
+                SessionReadMode::Auto
+            ),
             PathBuf::from("logs/session_stats.csv")
         );
         assert_eq!(
             resolve_stats_path(
                 &PathBuf::from("session.jsonl"),
-                Some(&PathBuf::from("custom.csv"))
+                Some(&PathBuf::from("custom.csv")),
+                SessionReadMode::Auto
             ),
             PathBuf::from("custom.csv")
+        );
+        assert_eq!(
+            resolve_stats_path(
+                &PathBuf::from("logs/session_part0002.jsonl"),
+                None,
+                SessionReadMode::Auto
+            ),
+            PathBuf::from("logs/session_stats.csv")
+        );
+        assert_eq!(
+            resolve_stats_path(
+                &PathBuf::from("logs/session_part0002.jsonl"),
+                None,
+                SessionReadMode::Only
+            ),
+            PathBuf::from("logs/session_part0002_stats.csv")
         );
     }
 
@@ -210,7 +255,7 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&stats_path);
 
-        write_stats_from_record(&replay_path, &stats_path).unwrap();
+        write_stats_from_record(&replay_path, &stats_path, SessionReadMode::Auto).unwrap();
         let stats = std::fs::read_to_string(&stats_path).unwrap();
         let _ = std::fs::remove_file(&stats_path);
 

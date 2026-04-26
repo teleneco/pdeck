@@ -6,6 +6,7 @@ use anyhow::Result;
 use crossterm::event::{self, Event};
 use tokio::sync::{mpsc, watch};
 
+use crate::config::build_status_line;
 use crate::log::append_text_log_event;
 use crate::model::App;
 use crate::probe;
@@ -32,9 +33,9 @@ pub async fn run_app(
         while let Ok(event) = rx.try_recv() {
             app.apply_probe_event(&event);
             if let Some(file) = record_file.as_deref_mut()
-                && append_record_event(file, &event)? == RecordWriteStatus::LimitReached
+                && append_record_event(file, &event)? == RecordWriteStatus::Rotated
             {
-                app.status_line.push_str(" | record limit reached");
+                app.status_line = build_status_line(&app.args, Some(&file.path().to_path_buf()));
             }
             if let Some(file) = log_file.as_deref_mut() {
                 append_text_log_event(file, &event)?;
@@ -80,9 +81,9 @@ pub async fn run_no_tui_app(
                 stdout.write_all(event.log_line.as_bytes())?;
                 stdout.flush()?;
                 if let Some(file) = record_file.as_deref_mut()
-                    && append_record_event(file, &event)? == RecordWriteStatus::LimitReached
+                    && append_record_event(file, &event)? == RecordWriteStatus::Rotated
                 {
-                    eprintln!("record size limit reached; stopped writing record events");
+                    eprintln!("rotated record to {}", file.path().display());
                 }
             }
             signal = tokio::signal::ctrl_c() => {

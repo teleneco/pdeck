@@ -70,8 +70,7 @@ If you want to read macOS `arp -a` style output directly, use `-A`.
 -c, --concurrency <N>     Maximum concurrent TCP/HTTP probes
 --icmp-backend <BACKEND>  auto, exec, or api
 --record [FILE]           Write JSONL session events
---record-overwrite        Replace an explicit --record file if it already exists
---record-size-limit BYTES Stop writing record events after this many bytes, default 0
+--record-size-limit SIZE  Rotate record files after this size, default 0
 --no-tui                  Print live probe results without opening the TUI
 ```
 
@@ -79,8 +78,11 @@ Recorded sessions are handled with subcommands:
 
 ```sh
 pdeck replay <FILE>
+pdeck replay --only <FILE>
 pdeck stats <FILE> [-o FILE]
+pdeck stats --only <FILE> [-o FILE]
 pdeck log <FILE> [-o FILE]
+pdeck log --only <FILE> [-o FILE]
 ```
 
 ICMP backend defaults:
@@ -116,12 +118,16 @@ cargo run -- --record session.jsonl
 When no record path is provided, the target file stem is included in the
 generated file name, such as `targets_20260425_120000.jsonl`.
 Generated record names avoid existing files by adding a numeric suffix when
-needed. Explicit record paths fail if the file already exists unless
-`--record-overwrite` is set.
+needed. Explicit record paths fail if the file already exists. Parent
+directories must already exist; pdeck does not create directories for record
+output.
 
-By default, record files have no size limit. Set `--record-size-limit BYTES` to
-stop writing further record events once the next event would exceed that size.
-Live probing continues after the record limit is reached.
+By default, record files have no size limit. Set `--record-size-limit SIZE` to
+rotate to the next JSONL file once the next event would exceed that size. Plain
+numbers are bytes; suffixes such as `1kb`, `100mb`, `1gb`, `100mib`, and
+`1gib` are also supported. For `--record session.jsonl`, rotated parts are
+named `session_part0002.jsonl`, `session_part0003.jsonl`, and so on. Existing
+base files or matching rotated parts are rejected instead of overwritten.
 
 Run live probes without the TUI:
 
@@ -134,7 +140,15 @@ Replay a recorded session:
 
 ```sh
 cargo run -- replay session.jsonl
+cargo run -- replay --only session_part0002.jsonl
 ```
+
+New recordings use JSONL format v2. Each file starts with metadata containing a
+`session_id`, `part`, `file_started_at`, and targets. When replay, stats, or log
+is given a v2 file, pdeck scans the same directory for `.jsonl` files with the
+same `session_id`, sorts them by `part`, and reads them as one session. Use
+`--only <FILE>` to inspect a single part without discovery. Older v1 single-file
+recordings remain readable.
 
 Replay controls:
 
@@ -148,6 +162,7 @@ Convert a recorded session to a text log:
 ```sh
 cargo run -- log session.jsonl
 cargo run -- log session.jsonl -o replay.log
+cargo run -- log --only session_part0002.jsonl
 ```
 
 Convert a recorded JSONL session to per-host CSV statistics:
@@ -155,24 +170,18 @@ Convert a recorded JSONL session to per-host CSV statistics:
 ```sh
 cargo run -- stats session.jsonl
 cargo run -- stats session.jsonl -o session-stats.csv
+cargo run -- stats --only session_part0002.jsonl
 ```
 
 This conversion reads the full recorded session and exits without opening the
 TUI. When no stats path is provided, `session.jsonl` writes `session_stats.csv`.
 Replay, stats, and log conversion skip blank or malformed JSONL event lines
-after the session header, so a partially damaged record can still be used when
-the remaining event lines are valid.
+after the session metadata/header, so a partially damaged record can still be
+used when the remaining event lines are valid.
 The stats CSV includes host, last resolved IP, description, packet counts,
 response/loss counts, loss percentage, RTT min/avg/max/stddev, first/last probe
 times, duration, downtime totals, downtime percentage, downtime periods, and the
 last observed status/response.
-
-## Roadmap
-
-- Add record rotation for long-running sessions, with a default target around
-  100MB per JSONL file.
-- Extend stats conversion to read multiple rotated JSONL files or a record
-  directory as one logical session.
 
 ## Build
 
