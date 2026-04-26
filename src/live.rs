@@ -6,6 +6,7 @@ use anyhow::Result;
 use crossterm::event::{self, Event};
 use tokio::sync::{mpsc, watch};
 
+use crate::config::build_status_line;
 use crate::log::append_text_log_event;
 use crate::model::App;
 use crate::probe;
@@ -34,8 +35,7 @@ pub async fn run_app(
             if let Some(file) = record_file.as_deref_mut()
                 && append_record_event(file, &event)? == RecordWriteStatus::Rotated
             {
-                app.status_line
-                    .push_str(&format!(" | record: {}", file.path().display()));
+                app.status_line = build_status_line(&app.args, Some(&file.path().to_path_buf()));
             }
             if let Some(file) = log_file.as_deref_mut() {
                 append_text_log_event(file, &event)?;
