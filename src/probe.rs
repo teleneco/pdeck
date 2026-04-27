@@ -25,6 +25,9 @@ enum IcmpBackend {
 
 type ProbeResult = (String, String, f64, Option<String>);
 
+const ICMP_EXEC_SPAWN_CONCURRENCY: usize = 16;
+const ICMP_EXEC_RESTART_DELAY: Duration = Duration::from_millis(750);
+
 struct ProbeWorker {
     index: usize,
     target: Target,
@@ -33,6 +36,8 @@ struct ProbeWorker {
     tx: mpsc::Sender<ProbeEvent>,
     pause_rx: watch::Receiver<bool>,
     semaphore: Arc<Semaphore>,
+    icmp_exec_spawn_semaphore: Arc<Semaphore>,
+    icmp_exec_phase_offset: Duration,
     icmp_backend: IcmpBackend,
 }
 
@@ -49,12 +54,28 @@ pub async fn probe_loop(
         .build()
         .context("failed to build http client")?;
     let semaphore = Arc::new(Semaphore::new(args.concurrency.max(1)));
+    let icmp_exec_spawn_semaphore = Arc::new(Semaphore::new(ICMP_EXEC_SPAWN_CONCURRENCY));
+    let icmp_target_count = targets
+        .iter()
+        .filter(|target| matches!(target.kind, TargetKind::Icmp))
+        .count();
+    let mut next_icmp_phase_index = 0;
     for (index, target) in targets.into_iter().enumerate() {
+        let icmp_exec_phase_index = if matches!(target.kind, TargetKind::Icmp) {
+            let phase_index = next_icmp_phase_index;
+            next_icmp_phase_index += 1;
+            phase_index
+        } else {
+            0
+        };
+        let icmp_exec_phase_offset =
+            icmp_exec_phase_offset(icmp_exec_phase_index, args.interval.0, icmp_target_count);
         let tx = tx.clone();
         let args = args.clone();
         let client = client.clone();
         let pause_rx = pause_rx.clone();
         let semaphore = semaphore.clone();
+        let icmp_exec_spawn_semaphore = icmp_exec_spawn_semaphore.clone();
         tokio::spawn(async move {
             run_probe_worker(ProbeWorker {
                 index,
@@ -64,6 +85,8 @@ pub async fn probe_loop(
                 tx,
                 pause_rx,
                 semaphore,
+                icmp_exec_spawn_semaphore,
+                icmp_exec_phase_offset,
                 icmp_backend,
             })
             .await;
@@ -82,11 +105,24 @@ async fn run_probe_worker(worker: ProbeWorker) {
         tx,
         mut pause_rx,
         semaphore,
+        icmp_exec_spawn_semaphore,
+        icmp_exec_phase_offset,
         icmp_backend,
     } = worker;
     if matches!(target.kind, TargetKind::Icmp) {
         match icmp_backend {
-            IcmpBackend::Exec => run_icmp_exec_worker(index, target, args, tx, pause_rx).await,
+            IcmpBackend::Exec => {
+                run_icmp_exec_worker(
+                    index,
+                    target,
+                    args,
+                    tx,
+                    pause_rx,
+                    icmp_exec_spawn_semaphore,
+                    icmp_exec_phase_offset,
+                )
+                .await
+            }
             IcmpBackend::Api => {
                 run_icmp_api_worker(index, target, args, tx, pause_rx, semaphore).await
             }
@@ -180,6 +216,8 @@ async fn run_icmp_exec_worker(
     args: Args,
     tx: mpsc::Sender<ProbeEvent>,
     mut pause_rx: watch::Receiver<bool>,
+    spawn_semaphore: Arc<Semaphore>,
+    phase_offset: Duration,
 ) {
     loop {
         while *pause_rx.borrow() {
@@ -187,11 +225,17 @@ async fn run_icmp_exec_worker(
                 return;
             }
         }
+        tokio::time::sleep(phase_offset).await;
 
         let mut last_resolved_ip = resolve_first_ip(&target.host).await;
+        let spawn_permit = match spawn_semaphore.clone().acquire_owned().await {
+            Ok(permit) => permit,
+            Err(_) => return,
+        };
         let mut child = match spawn_icmp_process(&target, args.interval.0, args.timeout.0) {
             Ok(child) => child,
             Err(err) => {
+                drop(spawn_permit);
                 let event = ProbeEvent {
                     index,
                     status: "x".to_string(),
@@ -211,10 +255,11 @@ async fn run_icmp_exec_worker(
                 if tx.send(event).await.is_err() {
                     return;
                 }
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(ICMP_EXEC_RESTART_DELAY).await;
                 continue;
             }
         };
+        drop(spawn_permit);
 
         let Some(stdout) = child.stdout.take() else {
             let _ = child.kill().await;
@@ -297,6 +342,7 @@ async fn run_icmp_exec_worker(
                 }
             }
         }
+        tokio::time::sleep(ICMP_EXEC_RESTART_DELAY).await;
     }
 }
 
@@ -360,6 +406,16 @@ async fn run_icmp_api_worker(
 
 fn now_ts_ms() -> u64 {
     Local::now().timestamp_millis().max(0) as u64
+}
+
+fn icmp_exec_phase_offset(index: usize, interval: Duration, target_count: usize) -> Duration {
+    if target_count == 0 {
+        return Duration::ZERO;
+    }
+
+    let step_nanos = interval.as_nanos() / target_count as u128;
+    let delay_nanos = (index as u128).saturating_mul(step_nanos);
+    Duration::from_nanos(delay_nanos.min(u128::from(u64::MAX)) as u64)
 }
 
 async fn probe_icmp_exec(target: &Target, timeout: Duration) -> Result<ProbeResult> {
@@ -911,6 +967,30 @@ mod tests {
         assert_eq!(
             format_socket_endpoint("2606:2800:220:1:248:1893:25c8:1946", 443),
             "[2606:2800:220:1:248:1893:25c8:1946]:443"
+        );
+    }
+
+    #[test]
+    fn derives_icmp_exec_phase_offset_from_interval_and_target_count() {
+        assert_eq!(
+            icmp_exec_phase_offset(42, Duration::from_secs(1), 100),
+            Duration::from_millis(420)
+        );
+        assert_eq!(
+            icmp_exec_phase_offset(99, Duration::from_secs(1), 100),
+            Duration::from_millis(990)
+        );
+        assert_eq!(
+            icmp_exec_phase_offset(0, Duration::from_secs(1), 100),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn derives_zero_icmp_exec_phase_offset_without_targets() {
+        assert_eq!(
+            icmp_exec_phase_offset(42, Duration::from_secs(1), 0),
+            Duration::ZERO
         );
     }
 

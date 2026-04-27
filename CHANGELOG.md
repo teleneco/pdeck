@@ -1,4 +1,8 @@
 # Changelog
+## v0.2.6
+
+- Default probe interval increased to 1s for improved stability.
+- Improved ICMP exec scheduling to reduce timeouts under load.
 
 ## v0.2.5
 

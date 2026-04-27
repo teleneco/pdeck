@@ -64,7 +64,7 @@ If you want to read macOS `arp -a` style output directly, use `-A`.
 
 ```text
 -f <FILE>                 Target file, default targets.txt
--i <DURATION>             Probe interval, default 500ms
+-i <DURATION>             Probe interval, default 1s
 -t <DURATION>             Per-probe timeout, default 3s
 -A                        Parse macOS arp -a style entries
 -c, --concurrency <N>     Maximum concurrent TCP/HTTP probes

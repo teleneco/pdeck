@@ -18,7 +18,7 @@ pub struct Args {
     #[command(subcommand)]
     pub command: Option<Command>,
 
-    #[arg(short = 'i', default_value = "500ms")]
+    #[arg(short = 'i', default_value = "1s")]
     pub interval: DurationArg,
 
     #[arg(short = 't', default_value = "3s")]
@@ -184,7 +184,11 @@ fn parse_size(input: &str) -> Result<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_duration, parse_size};
+    use std::time::Duration;
+
+    use clap::Parser;
+
+    use super::{Args, parse_duration, parse_size};
 
     #[test]
     fn parses_size_units() {
@@ -207,13 +211,15 @@ mod tests {
 
     #[test]
     fn parses_duration_units() {
-        assert_eq!(
-            parse_duration("500ms").unwrap(),
-            std::time::Duration::from_millis(500)
-        );
-        assert_eq!(
-            parse_duration("3s").unwrap(),
-            std::time::Duration::from_secs(3)
-        );
+        assert_eq!(parse_duration("500ms").unwrap(), Duration::from_millis(500));
+        assert_eq!(parse_duration("3s").unwrap(), Duration::from_secs(3));
+    }
+
+    #[test]
+    fn defaults_interval_to_one_second_and_timeout_to_three_seconds() {
+        let args = Args::parse_from(["pdeck"]);
+
+        assert_eq!(args.interval.0, Duration::from_secs(1));
+        assert_eq!(args.timeout.0, Duration::from_secs(3));
     }
 }
