@@ -21,13 +21,13 @@ See [CHANGELOG.md](./CHANGELOG.md) for release history.
 Run with the default `targets.txt` in the current directory:
 
 ```sh
-cargo run
+pdeck
 ```
 
 Run with a different target file:
 
 ```sh
-cargo run -- -f targets-mixed.txt
+pdeck -f targets-mixed.txt
 ```
 
 ## Target File Format
@@ -70,9 +70,30 @@ If you want to read macOS `arp -a` style output directly, use `-A`.
 -c, --concurrency <N>     Maximum concurrent TCP/HTTP probes
 --icmp-backend <BACKEND>  auto, exec, or api
 --record [FILE]           Write JSONL session events
+--no-record               Disable config-enabled recording for this run
 --record-size-limit SIZE  Rotate record files after this size, default 0
 --no-tui                  Print live probe results without opening the TUI
 ```
+
+## Configuration
+
+Live mode can read recording defaults from `~/.config/pdeck/config.toml`.
+Command-line record options override config values.
+
+```toml
+record = false
+record_dir = "~/.config/pdeck/records"
+record_size_limit = "0"
+always_use_record_dir = true
+```
+
+Set `record = true` to record live sessions by default. If `record_dir` is
+omitted, config-enabled recording uses `~/.config/pdeck/records`.
+Use `--no-record` to disable config-enabled recording for one run.
+
+By default, `pdeck --record` without a file also writes under `record_dir`.
+Set `always_use_record_dir = false` to keep pathless `--record` output in the
+current directory.
 
 Recorded sessions are handled with subcommands:
 
@@ -83,6 +104,26 @@ pdeck stats <FILE> [-o FILE]
 pdeck stats --only <FILE> [-o FILE]
 pdeck log <FILE> [-o FILE]
 pdeck log --only <FILE> [-o FILE]
+```
+
+Create the default config file and records directory if they do not exist:
+
+```sh
+pdeck config set
+```
+
+Show or verify the config:
+
+```sh
+pdeck config show
+pdeck config verify
+```
+
+Update config values:
+
+```sh
+pdeck config set --record true --record-dir ~/.config/pdeck/records
+pdeck config set --record-size-limit 100mb --always-use-record-dir true
 ```
 
 ICMP backend defaults:
@@ -111,8 +152,8 @@ Ctrl+C       Quit
 Record a live session:
 
 ```sh
-cargo run -- -f targets.txt --record
-cargo run -- --record session.jsonl
+pdeck -f targets.txt --record
+pdeck --record session.jsonl
 ```
 
 When no record path is provided, the target file stem is included in the
@@ -132,15 +173,15 @@ base files or matching rotated parts are rejected instead of overwritten.
 Run live probes without the TUI:
 
 ```sh
-cargo run -- -f targets.txt --no-tui
-cargo run -- -f targets.txt --no-tui --record
+pdeck -f targets.txt --no-tui
+pdeck -f targets.txt --no-tui --record
 ```
 
 Replay a recorded session:
 
 ```sh
-cargo run -- replay session.jsonl
-cargo run -- replay --only session_part0002.jsonl
+pdeck replay session.jsonl
+pdeck replay --only session_part0002.jsonl
 ```
 
 New recordings use JSONL format v2. Each file starts with metadata containing a
@@ -160,17 +201,17 @@ Replay controls:
 Convert a recorded session to a text log:
 
 ```sh
-cargo run -- log session.jsonl
-cargo run -- log session.jsonl -o replay.log
-cargo run -- log --only session_part0002.jsonl
+pdeck log session.jsonl
+pdeck log session.jsonl -o replay.log
+pdeck log --only session_part0002.jsonl
 ```
 
 Convert a recorded JSONL session to per-host CSV statistics:
 
 ```sh
-cargo run -- stats session.jsonl
-cargo run -- stats session.jsonl -o session-stats.csv
-cargo run -- stats --only session_part0002.jsonl
+pdeck stats session.jsonl
+pdeck stats session.jsonl -o session-stats.csv
+pdeck stats --only session_part0002.jsonl
 ```
 
 This conversion reads the full recorded session and exits without opening the

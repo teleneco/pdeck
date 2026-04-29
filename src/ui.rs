@@ -13,6 +13,7 @@ use ratatui::widgets::{
 use ratatui::{DefaultTerminal, Frame};
 use tokio::sync::watch;
 
+use crate::cli::Command;
 use crate::model::{App, HostStats, RepeatableAction, RttSample};
 
 pub struct TerminalGuard {
@@ -49,7 +50,7 @@ pub fn draw_ui(frame: &mut Frame<'_>, app: &App) {
         ])
         .split(root);
 
-    let header = if app.args.replay.is_some() {
+    let header = if matches!(app.args.command, Some(Command::Replay { .. })) {
         Line::from(vec![
             Span::raw("Ctrl+S pause/resume  "),
             Span::raw("1/2/5/0 speed  "),

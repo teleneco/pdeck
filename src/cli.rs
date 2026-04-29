@@ -39,6 +39,9 @@ pub struct Args {
     #[arg(long, num_args = 0..=1, value_name = "FILE")]
     pub record: Option<Option<PathBuf>>,
 
+    #[arg(long)]
+    pub no_record: bool,
+
     #[arg(long, hide = true)]
     pub record_overwrite: bool,
 
@@ -47,19 +50,15 @@ pub struct Args {
 
     #[arg(long)]
     pub no_tui: bool,
-
-    #[arg(long, hide = true)]
-    pub replay: Option<PathBuf>,
-
-    #[arg(long, hide = true)]
-    pub log: Option<PathBuf>,
-
-    #[arg(long, num_args = 0..=1, value_name = "FILE", hide = true)]
-    pub stats: Option<Option<PathBuf>>,
 }
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Command {
+    #[command(about = "Manage pdeck configuration")]
+    Config {
+        #[command(subcommand)]
+        command: Option<ConfigCommand>,
+    },
     #[command(about = "Replay a recorded JSONL session in the TUI")]
     Replay {
         #[arg(value_name = "FILE", help = "Recorded JSONL file to replay")]
@@ -102,6 +101,28 @@ pub enum Command {
         )]
         only: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ConfigCommand {
+    #[command(about = "Create or update ~/.config/pdeck/config.toml")]
+    Set {
+        #[arg(long, value_name = "BOOL")]
+        record: Option<bool>,
+
+        #[arg(long, value_name = "DIR")]
+        record_dir: Option<PathBuf>,
+
+        #[arg(long, value_name = "SIZE")]
+        record_size_limit: Option<String>,
+
+        #[arg(long, value_name = "BOOL")]
+        always_use_record_dir: Option<bool>,
+    },
+    #[command(about = "Show the current config file")]
+    Show,
+    #[command(about = "Verify the current config file")]
+    Verify,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]

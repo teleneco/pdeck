@@ -1,4 +1,11 @@
 # Changelog
+## v0.3.0
+
+- Add optional live-mode recording defaults from `~/.config/pdeck/config.toml`.
+- Add `--no-record` to disable config-enabled recording for one run.
+- Add `pdeck config set`, `show`, and `verify` for config management.
+- Remove hidden legacy replay, stats, and log options in favor of subcommands.
+
 ## v0.2.6
 
 - Default probe interval increased to 1s for improved stability.

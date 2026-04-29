@@ -16,7 +16,7 @@ pub fn write_stats_from_record(
 ) -> Result<()> {
     let session = read_session_events_with_mode(replay_path, mode)?;
     let mut app = App::new(
-        stats_args(replay_path.to_path_buf()),
+        stats_args(),
         session.targets,
         "stats conversion".to_string(),
     );
@@ -179,7 +179,7 @@ fn format_ts(ts_ms: u64) -> String {
     }
 }
 
-fn stats_args(replay_path: PathBuf) -> Args {
+fn stats_args() -> Args {
     Args {
         command: None,
         interval: crate::cli::DurationArg(std::time::Duration::from_millis(500)),
@@ -189,12 +189,10 @@ fn stats_args(replay_path: PathBuf) -> Args {
         concurrency: 16,
         icmp_backend: crate::cli::IcmpBackendArg::Auto,
         record: None,
+        no_record: false,
         record_overwrite: false,
         record_size_limit: crate::cli::SizeArg(0),
         no_tui: false,
-        replay: Some(replay_path),
-        log: None,
-        stats: None,
     }
 }
 
